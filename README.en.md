@@ -1,3 +1,5 @@
+> **WB / CA fork**: The default branch is `wb-ca`, based on upstream v2.11.21. It adds Huawei CodeArts accounts, platform-scoped keys and models, credits and automatic claims, a CA dashboard, account egress selection, HTTP clipboard fixes and callback dialog fixes. See the [fork notes and CA service setup](https://github.com/gungod-99/workbuddy-manager/blob/wb-ca/FORK.md). `main` retains the upstream code; the original author's documentation follows.
+
 <div align="center">
 
 # WorkBuddy Manager

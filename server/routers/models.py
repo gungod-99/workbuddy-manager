@@ -11,10 +11,10 @@
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from .. import security
-from ..services import modelcatalog
+from ..services import modelcatalog, codearts, platforms
 
 router = APIRouter(prefix='/api', tags=['models'])
 
@@ -23,6 +23,7 @@ router = APIRouter(prefix='/api', tags=['models'])
 async def model_catalog(
     realm: str = 'cn',
     force: bool = False,
+    platform: str = 'wb',
     user: dict = Depends(security.current_user),
 ) -> dict:
     """指定版本的模型清单 + 统计。
@@ -32,11 +33,18 @@ async def model_catalog(
     """
     if force and user.get('role') != 'admin':
         force = False
+    try:
+        selected = platforms.normalize(platform)
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
+    if selected == 'ca':
+        return await codearts.catalog(force=force)
     r = 'global' if str(realm).strip().lower() == 'global' else 'cn'
     data = await modelcatalog.catalog(r, force=force)
     models = data.get('models') or []
     return {
         **data,
         'realm': r,
+        'platform': 'wb',
         'summary': modelcatalog.summarize(models),
     }

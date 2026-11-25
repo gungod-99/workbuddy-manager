@@ -111,6 +111,7 @@ const REASON_KEYS: Record<string, string> = {
   ip_not_allowed: 'security.reasonIpNotAllowed',
   too_many_ips: 'security.reasonTooManyIps',
   realm_mismatch: 'security.reasonRealmMismatch',
+  platform_mismatch: 'security.reasonPlatformMismatch',
   model_not_allowed: 'security.reasonModelNotAllowed',
 };
 

@@ -111,6 +111,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
   -- 空值是**历史密钥**的存量形态（本列引入前创建的），保持其原有行为不变，
   -- 界面上单独标注以便管理员补填。新建密钥一律要选一个版本。
   realm         TEXT    NOT NULL DEFAULT '',
+  platform      TEXT    NOT NULL DEFAULT 'wb',
   quota         INTEGER NOT NULL DEFAULT 0,
   used_tokens   INTEGER NOT NULL DEFAULT 0,
   -- 积分额度与已用量（issue #27）：与 token 限额**各自独立**，0 = 不限。
@@ -442,6 +443,7 @@ CREATE INDEX IF NOT EXISTS idx_packet_shares ON red_packet_shares(packet_id);
 CREATE TABLE IF NOT EXISTS upstreams (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   name       TEXT    NOT NULL,
+  platform   TEXT    NOT NULL DEFAULT 'wb',
   base_url   TEXT    NOT NULL,
   api_key    TEXT    NOT NULL DEFAULT '',
   note       TEXT    NOT NULL DEFAULT '',
@@ -795,6 +797,8 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     # 不设外键约束：SQLite 的外键要开 PRAGMA 且删除上游时语义是「级联删密钥」还是
     # 「拒绝删」都不合适 —— 本项目在应用层做「被引用就拒绝删」（见 upstreamsvc）。
     ('api_keys', 'upstream_id', 'INTEGER'),
+    ('api_keys', 'platform', "TEXT NOT NULL DEFAULT 'wb'"),
+    ('upstreams', 'platform', "TEXT NOT NULL DEFAULT 'wb'"),
     # 分组（账号池）的**本地账号目录**：面板据此列账号 / 添号 / 移动账号。
     # 空 = 不做账号管理（该分组只用于密钥转发）。默认分组的目录来自 WB_AUTH_DIR，
     # 是运行时结果、不落库——与「默认上游不是数据库里的一行」同一个道理。
@@ -1168,7 +1172,7 @@ def bump_usage(
 ) -> None:
     """累计当日用量。credit 为本次真实扣费，缺省不计入（不按 0 记）。
 
-    realm（cn / global）由调用方按模型名前缀判定后传入；缺省归 cn
+    realm（cn / global / ca）由调用方按平台与模型名前缀判定后传入；缺省归 cn
     （与 realm_of_model 的口径一致：无前缀即国内版）。
 
     cache_hit / cache_miss / ts（issue #380）：费用要按「命中价 / 未命中价」
@@ -1177,7 +1181,7 @@ def bump_usage(
     按天与按小时两张表拿的是同一个值，不会出现两处对不上。
     """
     day = day_of(ts)
-    r = realm if realm in ('cn', 'global') else realm_of_model(model)
+    r = realm if realm in ('cn', 'global', 'ca') else realm_of_model(model)
     cost = _estimate_cost(model, prompt_tokens, completion_tokens, cache_hit, cache_miss, ts)
     hit = int(cache_hit or 0)
     miss = int(cache_miss or 0)
@@ -1242,7 +1246,7 @@ def _estimate_cost(model: str | None,
 
 
 def realm_of_model(model: str | None) -> str:
-    """从模型名判定版本：上游的路由协议是 `cn:` / `global:` 前缀。
+    """从模型名判定用量分区：WB 的 `cn:` / `global:` 与 CA 的 `codearts/`。
 
     为什么以模型名为准：网关把模型名原样转发给上游，由上游按前缀选择账号池
     ——所以「这次调用走的是哪个版本」完全由前缀决定，与调用方用哪个密钥无关。
@@ -1251,6 +1255,8 @@ def realm_of_model(model: str | None) -> str:
     归到 cn 才能让它们落在原来的那一侧，不凭空改变历史归属。
     """
     m = str(model or '').strip().lower()
+    if m.startswith('codearts/'):
+        return 'ca'
     if m.startswith('global:'):
         return 'global'
     return 'cn'

@@ -15,7 +15,7 @@ import {ConfirmDialog} from '@/components/common/layout/ConfirmDialog';
 import {LoadError} from '@/components/common/states/LoadError';
 import {SkeletonBar} from '@/components/common/states/SkeletonBar';
 import {useAuth} from '@/lib/auth-context';
-import {useRealm} from '@/lib/realm-context';
+import {useUsageScope} from '@/lib/platform-context';
 import {Button} from '@/components/ui/button';
 import {CopyButton} from '@/components/ui/copy-button';
 import {useT} from '@/lib/i18n/provider';
@@ -106,7 +106,7 @@ export default function LogsPage() {
   const t = useT();
   const {isAdmin} = useAuth();
   // 日志随顶部版本切换：两个版本走不同账号池，混看会把两个池子的调用搅在一起
-  const {realm} = useRealm();
+  const {realm, platform} = useUsageScope();
   const [page, setPage] = useState(1);
   const [detail, setDetail] = useState<RequestLog | null>(null);
 
@@ -147,6 +147,8 @@ export default function LogsPage() {
   if (lastRealm.current !== realm) {
     lastRealm.current = realm;
     if (page !== 1) setPage(1);
+    if (keyId !== 'all') setKeyId('all');
+    setDetail(null);
   }
 
   /**
@@ -204,7 +206,7 @@ export default function LogsPage() {
     values: keyValues,
     errors: keyErrors,
     reload: reloadKeys,
-  } = useAsyncAll({keys: () => keyApi.list()}, []);
+  } = useAsyncAll({keys: () => keyApi.list(platform)}, [platform]);
 
   /**
    * 账号回填自诊断（issue #232）。
@@ -220,8 +222,8 @@ export default function LogsPage() {
     errors: backfillErrors,
     reload: reloadBackfill,
   } = useAsyncAll(
-    {backfill: isAdmin ? () => logApi.accountBackfill() : () => Promise.resolve(undefined)},
-    [isAdmin],
+    {backfill: isAdmin && platform === 'wb' ? () => logApi.accountBackfill() : () => Promise.resolve(undefined)},
+    [isAdmin, platform],
   );
   const backfill = backfillValues.backfill;
 

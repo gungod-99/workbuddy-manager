@@ -41,9 +41,9 @@ def list_logs(
     where: list[str] = []
     args: list[object] = []
 
-    # 版本过滤（cn / global）。历史记录该列为 NULL —— 按 cn 归类，
+    # 用量分区过滤（cn / global / ca）。历史记录该列为 NULL —— 按 cn 归类，
     # 与 db.realm_of_model 的口径一致（无前缀即国内版）。
-    if realm in ('cn', 'global'):
+    if realm in ('cn', 'global', 'ca'):
         if realm == 'cn':
             where.append('(l.realm = ? OR l.realm IS NULL)')
         else:
@@ -97,6 +97,7 @@ def list_logs(
             'mapped_model': r['mapped_model'],
             'status': r['status'],
             'realm': r['realm'] or 'cn',
+            'platform': 'ca' if r['realm'] == 'ca' else 'wb',
             'prompt_tokens': r['prompt_tokens'],
             'completion_tokens': r['completion_tokens'],
             'latency_ms': r['latency_ms'],

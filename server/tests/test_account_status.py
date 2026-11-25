@@ -184,11 +184,10 @@ class DashboardGroupCoverageTest(unittest.TestCase):
         扇出先跑完时清单还是空的，而它不会因为清单后到而重跑，于是静默退化成
         「只报默认分组」：界面正常、数字正常、只是少了几组。
 
-        所以断言「扇出函数体里出现了 upstreamsApi.list()」而不是「页面里有
-        upstreamsApi.list()」。
+        所以断言「扇出函数体里取得 WB 平台的分组清单」，而不是只看整个页面。
         """
         body = _body(_code(_DASHBOARD), 'async function loadPoolSnapshot')
-        self.assertIn('upstreamsApi.list()', body,
+        self.assertIn("upstreamsApi.list('wb')", body,
                       '按分组扇出的取数函数没有自己取分组清单——若它依赖另一个 hook 的'
                       '结果，首帧清单还是空的，会静默退化成「只报默认分组」')
         self.assertIn('accountGroups(', body,

@@ -19,11 +19,13 @@ from pydantic import BaseModel, Field
 from .. import config, security, upstreamsvc
 from ..iputil import client_ip
 from . import gateway
+from ..services import platforms, codearts
 
 router = APIRouter(prefix='/api/playground', tags=['playground'])
 
 
 class ChatIn(BaseModel):
+    platform: str = Field(default='wb', max_length=8)
     """测试台请求。messages 直接透传给上游，不做内容校验。"""
     model: str = Field(min_length=1, max_length=128)
     messages: list[dict] = Field(min_length=1, max_length=200)
@@ -61,11 +63,18 @@ async def chat(body: ChatIn, request: Request, user: dict = Depends(security.req
     """
     # 测试台没有下游密钥（管理员会话直连），固定走默认上游 —— 与从前一致。
     # 走 upstreamsvc 而不是直接读 config：默认上游的取值只有一处事实来源。
-    upstream = upstreamsvc.default_upstream()
+    try:
+        selected = platforms.normalize(body.platform)
+        upstream = upstreamsvc.resolve_for_key({'platform': selected})
+    except (ValueError, upstreamsvc.UpstreamUnavailable) as exc:
+        raise HTTPException(503, detail=str(exc)) from exc
     ip = client_ip(request)
     started = time.time()
     realm = 'global' if str(body.realm).strip().lower() == 'global' else 'cn'
-    model_sent = _qualified_model(body.model, realm)
+    model_sent = body.model.strip() if selected == 'ca' else _qualified_model(body.model, realm)
+    platform_error = platforms.check_model({'platform': selected}, model_sent, model_sent)
+    if platform_error:
+        raise HTTPException(400, detail=platform_error)
     payload: dict = {
         'model': model_sent,
         'messages': body.messages,
@@ -168,6 +177,7 @@ async def chat(body: ChatIn, request: Request, user: dict = Depends(security.req
 @router.get('/models')
 async def playground_models(
     realm: str = 'cn',
+    platform: str = 'wb',
     user: dict = Depends(security.current_user),
 ) -> dict:
     """测试台的模型下拉：复用模型目录，带上可用的推理档位。
@@ -179,7 +189,11 @@ async def playground_models(
     from ..services import modelcatalog
 
     r = 'global' if str(realm).strip().lower() == 'global' else 'cn'
-    data = await modelcatalog.catalog(r)
+    try:
+        selected = platforms.normalize(platform)
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
+    data = await codearts.catalog() if selected == 'ca' else await modelcatalog.catalog(r)
     return {
         'models': [
             {'id': m['id'], 'name': m.get('name') or m['id'],
@@ -189,4 +203,5 @@ async def playground_models(
         'source': data.get('source'),
         'source_label': data.get('source_label'),
         'realm': r,
+        'platform': selected,
     }

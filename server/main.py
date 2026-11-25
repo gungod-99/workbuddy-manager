@@ -14,12 +14,12 @@ from starlette.middleware.gzip import GZipMiddleware
 import json
 import logging
 
-from . import config, db, inflight, redpacket, security
+from . import config, db, inflight, keysvc, redpacket, security
 from .iputil import client_ip
 from .stdio_utf8 import force_utf8_stdio
 from .routers import (
     accounts, accountrisk as accountrisk_router, anthropic, auth, balance, gateway, keys, logs, models,
-    playground,
+    playground, codearts as codearts_router,
     pgsync as pgsync_router, redpackets, responses, security as security_router,
     proxies, settings, stats, system, tap as tap_router, tokens, upstreams,
     watchdog as watchdog_router,
@@ -492,11 +492,16 @@ class GatewayInFlightMiddleware:
         if scope.get('type') != 'http' or not _is_gateway_path(path):
             await self.app(scope, receive, send)
             return
-        inflight.enter()
+        # 用密钥所属平台分开统计在途；不读取请求体，也不在中间件改写模型。
+        request = Request(scope)
+        token = gateway._bearer(request)
+        key = keysvc.resolve(token) if token else None
+        selected = 'ca' if key and key.get('platform') == 'ca' else 'wb'
+        inflight.enter(selected)
         try:
             await self.app(scope, receive, send)
         finally:
-            inflight.leave()
+            inflight.leave(selected)
 
 
 app.add_middleware(GatewayInFlightMiddleware)
@@ -536,6 +541,7 @@ if config.GZIP_ENABLED:
 # ── 路由注册顺序很重要：先 API / 网关，最后挂静态文件 ──
 app.include_router(auth.router)
 app.include_router(accounts.router)
+app.include_router(codearts_router.router)
 app.include_router(accountrisk_router.router)
 app.include_router(keys.router)
 # 红包：批量发放带额度的密钥（与密钥同属「分发」这件事，所以挨着放）

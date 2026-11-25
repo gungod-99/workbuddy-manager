@@ -4,7 +4,7 @@ import {useCallback, useEffect, useRef, useState} from 'react';
 import {QRCodeSVG} from 'qrcode.react';
 import {notify} from '@/lib/toast';
 import {useT} from '@/lib/i18n/provider';
-import {Loader2, CheckCircle2, AlertTriangle, ExternalLink} from 'lucide-react';
+import {Loader2, CheckCircle2, AlertTriangle, ExternalLink, Route} from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -24,7 +24,7 @@ import {
   DialogHeader,
 } from '@/components/animate-ui/radix/dialog';
 
-type Phase = 'loading' | 'waiting' | 'success' | 'error'
+type Phase = 'setup' | 'loading' | 'waiting' | 'success' | 'error'
   /**
    * 凭证已写入、但上游的「系统禁用」没解除（或还在后台尝试）。
    *
@@ -100,6 +100,7 @@ export interface ReloginTarget {
   nickname?: string;
   realm: Realm;
   file?: string;
+  proxy?: string;
   /** 面板里被「临时停用」（文件名带 .disabled）：重登刷凭证，但不会自动启用它 */
   panel_disabled?: boolean;
 }
@@ -120,11 +121,13 @@ export function AddAccountDialog({
   target?: ReloginTarget | null;
 }) {
   const t = useT();
-  const [phase, setPhase] = useState<Phase>('loading');
+  const [phase, setPhase] = useState<Phase>('setup');
   /** 版本：重登时跟目标账号，添加时跟全站切换（国际版要选地区） */
   const {realm: uiRealm, label: uiRealmName} = useRealm();
   const realm: Realm = target?.realm ?? uiRealm;
   const realmName = target ? (realm === 'global' ? t('realm.global') : t('realm.cn')) : uiRealmName;
+  const targetUid = target?.uid;
+  const targetProxy = target?.proxy;
   /** 国际版地区代码（如 HK）。不预选：地区属于账号归属信息，交由用户决定 */
   const [region, setRegion] = useState('');
   const [proxy, setProxy] = useState<string | undefined>(undefined);
@@ -134,6 +137,8 @@ export function AddAccountDialog({
   const [authUrl, setAuthUrl] = useState('');
   const [message, setMessage] = useState('');
   const stateRef = useRef('');
+  const routeOwnerRef = useRef<string | null>(null);
+  const attemptRef = useRef(0);
   const timerRef = useRef<number | null>(null);
   /** 上一次 poll 是否还在飞：单次超过 2 秒时避免请求叠加 */
   const pollingRef = useRef(false);
@@ -148,6 +153,7 @@ export function AddAccountDialog({
   const tickRef = useRef<(() => void) | null>(null);
 
   const stopPoll = useCallback(() => {
+    attemptRef.current += 1;
     if (timerRef.current !== null) {
       window.clearInterval(timerRef.current);
       timerRef.current = null;
@@ -167,26 +173,33 @@ export function AddAccountDialog({
   useEffect(() => {
     if (!open) { setRoutesReady(false); return; }
     let active = true;
+    routeOwnerRef.current = null;
     setRoutesReady(false);
     setRouteError('');
+    setProxy(undefined);
+    setPhase('setup');
+    setAuthUrl('');
     accountApi.proxies().then((data) => {
       if (!active) return;
       setProxyRoutes(data.routes);
-      setProxy(data.default || '');
+      setProxy(targetUid ? (targetProxy ?? '') : (data.default || undefined));
+      routeOwnerRef.current = targetUid || 'new';
       setRoutesReady(true);
     }).catch((error) => {
       if (!active) return;
       setRouteError(errText(error));
-      // 线路表只是一个可选出口：拉取失败不该把「加账号」卡死，否则二维码
-      // 永远不出现、弹窗看起来像在无限加载。退回直连继续扫码，错误仍留在上方。
-      setProxy('');
+      setProxyRoutes([]);
+      // Keep an existing binding; a failed route lookup must not change its egress.
+      setProxy(targetUid ? (targetProxy ?? '') : undefined);
+      routeOwnerRef.current = targetUid || 'new';
       setRoutesReady(true);
     });
     return () => { active = false; };
-  }, [open]);
+  }, [open, targetUid, targetProxy]);
 
   const start = useCallback(async () => {
     stopPoll();
+    const attempt = attemptRef.current;
     failsRef.current = 0;
     setPhase('loading');
     setMessage(t('addAccount.requesting'));
@@ -196,12 +209,14 @@ export function AddAccountDialog({
       // 登记必须在落盘前完成，它那条路径读不到弹窗里的 state，只能在这里给。
       const data = await accountApi.start(realm, upstreamId, region || undefined, proxy,
                                           target?.uid);
+      if (attempt !== attemptRef.current) return;
       stateRef.current = data.state;
       setAuthUrl(data.authUrl);
       setPhase('waiting');
       setMessage(t('addAccount.waiting'));
 
       const tick = async () => {
+        if (attempt !== attemptRef.current) return;
         // 标签页在后台就不查：浏览器本来也会把定时器节流到约 1 次/分钟，
         // 与其让它零星触发，不如等用户切回来时补一次（与 useHeartbeat 同口径）。
         // 判断放在 tick 内部而不是调用处 —— 因为 visibilitychange 在**隐藏与
@@ -212,6 +227,7 @@ export function AddAccountDialog({
         try {
           const res = await accountApi.poll(stateRef.current, realm, region || undefined,
                                             upstreamId);
+          if (attempt !== attemptRef.current) return;
           // 拿到任何一次正常响应就清零：计数要表达的是「**连续**失败」，
           // 而不是「累计失败了几次」。不清零的话，几分钟内零散抖三次
           // （每次之间都恢复正常）也会触发中断，把一次正常的扫码打断。
@@ -278,6 +294,7 @@ export function AddAccountDialog({
             }));
           }
         } catch (e) {
+          if (attempt !== attemptRef.current) return;
           // 不再静默吞掉：轮询出错（落盘失败 / 网络抖动 / 上游超时）以前会被
           // 丢弃并继续轮询，最后必然走到「二维码已失效」——把真实原因藏了起来。
           // 现在连续失败到阈值就报出来，并保留重试入口。
@@ -288,7 +305,7 @@ export function AddAccountDialog({
             setMessage(errText(e));
           }
         } finally {
-          pollingRef.current = false;
+          if (attempt === attemptRef.current) pollingRef.current = false;
         }
       };
 
@@ -305,17 +322,22 @@ export function AddAccountDialog({
       // 这里只是去读结果，所以补得越勤也只是读一次内存。
       wakeEvents().forEach(([target, event]) => target.addEventListener(event, tick));
     } catch (e) {
+      if (attempt !== attemptRef.current) return;
       setPhase('error');
       setMessage(errText(e));
     }
   }, [onOpenChange, onSuccess, stopPoll, realm, region, proxy, t, upstreamId,
-      target?.uid]);
+      target?.uid, target?.nickname]);
 
   useEffect(() => {
-    if (open && routesReady) {
+    if (open && routesReady && routeOwnerRef.current === (target?.uid || 'new')
+        && proxy !== undefined && (realm !== 'global' || region)) {
       start();
     } else {
       stopPoll();
+      setAuthUrl('');
+      setPhase('setup');
+      setMessage(t('addAccount.connectionSetup'));
     }
     return stopPoll;
     // 版本或地区变化时重新申请：扫码码是绑定端点的，旧码不能跨版本用
@@ -364,31 +386,39 @@ export function AddAccountDialog({
             </div>
           )}
           {routeError && <p role="alert" className="text-xs text-destructive">{routeError}</p>}
-          {/* 没有配置任何线路时整个选择器都不出现：那时下拉里只有「直连」一项，
-              摆出来只会让人以为能选却选不动（线路表读自上游配置的 proxies）。 */}
-          {proxyRoutes.length > 0 && (
+          {/* Choose the account's egress before requesting an authorization code. */}
             <div className="w-full space-y-1.5">
               <div className="text-[11px] font-medium">{t('accounts.proxyLine')}</div>
-              <Select value={proxy ? `route:${proxy}` : 'default'} disabled={!routesReady}
-                      onValueChange={(value) => setProxy(value === 'default' ? '' : value.slice(6))}>
+              <Select value={proxy === undefined ? '' : proxy === '__direct__' ? '__direct__'
+                        : proxy ? `route:${proxy}` : 'default'} disabled={!routesReady || phase === 'loading'}
+                      onValueChange={(value) => setProxy(value === 'default' ? ''
+                        : value === '__direct__' ? '__direct__' : value.slice(6))}>
                 <SelectTrigger className="h-9 w-full rounded-full text-xs" aria-label={t('accounts.proxyLine')}>
-                <SelectValue />
+                <SelectValue placeholder={t('addAccount.connectionPlaceholder')} />
               </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="__direct__">{t('accounts.proxyDirectOnly')}</SelectItem>
                   <SelectItem value="default">{t('accounts.proxyDirect')}</SelectItem>
-                  {proxy && !proxyRoutes.includes(proxy) &&
+                  {proxy && proxy !== '__direct__' && !proxyRoutes.includes(proxy) &&
                     <SelectItem value={`route:${proxy}`}>{proxy} ({t('accounts.proxyMissing')})</SelectItem>}
                   {proxyRoutes.map((route) => <SelectItem key={route} value={`route:${route}`}>{route}</SelectItem>)}
                 </SelectContent>
               </Select>
+              <p className="text-[11px] leading-4 text-muted-foreground">
+                {t('addAccount.connectionHint')}
+              </p>
+              {realm === 'global' && proxy && proxy !== '__direct__' && (
+                <p className="text-[11px] leading-4 text-muted-foreground">
+                  {t('addAccount.browserProxyHint')}
+                </p>
+              )}
             </div>
-          )}
           {/* 国际版必须先完成地区注册，否则聊天报 14017。
               放在二维码之前：地区一变就要重新申请授权码，先选好再扫省得白扫。 */}
           {realm === 'global' && (
             <div className="w-full space-y-1.5">
               <div className="text-[11px] font-medium">{t('addAccount.regionLabel')}</div>
-              <Select value={region} onValueChange={setRegion}>
+              <Select value={region} onValueChange={setRegion} disabled={phase === 'loading'}>
                 <SelectTrigger className="h-9 w-full rounded-full text-xs" aria-label={t('addAccount.regionLabel')}>
                   <SelectValue placeholder={t('addAccount.regionPlaceholder')} />
                 </SelectTrigger>
@@ -410,6 +440,7 @@ export function AddAccountDialog({
 
           {/* 固定尺寸，避免 loading/waiting/error 各阶段弹窗高度跳动 */}
           <div className="grid h-[212px] w-[212px] shrink-0 place-items-center overflow-hidden rounded-2xl bg-white p-3 ring-1 ring-black/5">
+            {phase === 'setup' && <Route className="h-7 w-7 text-muted-foreground" />}
             {phase === 'loading' && <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />}
             {(phase === 'error' || phase === 'reviveFailed') &&
               <AlertTriangle className="h-7 w-7 text-amber-500" />}

@@ -24,6 +24,7 @@ import time
 from pathlib import Path
 
 from . import config, db
+from .services import platforms
 
 # 默认上游的 id 约定：None（而不是某个魔法数字）。
 # 为什么不用 0：0 在 SQL 里是合法 id，前端序列化时 '' / 0 / null 极易混淆，
@@ -98,6 +99,7 @@ def _row_to_dict(row) -> dict:
     return {
         'id': int(row['id']),
         'name': str(row['name']),
+        'platform': platforms.normalize(row['platform'] if 'platform' in row.keys() else 'wb'),
         'base_url': str(row['base_url']),
         'api_key': str(row['api_key'] or ''),
         'note': str(row['note'] or ''),
@@ -114,6 +116,7 @@ def default_upstream() -> dict:
     """默认上游（环境变量 / 上游 config.json），永远可用、不可编辑、不可删除。"""
     return {
         'id': DEFAULT_ID,
+        'platform': 'wb',
         'name': '默认上游',
         'base_url': config.WB2API_BASE,
         'api_key': config.upstream_api_key(),
@@ -154,7 +157,10 @@ def list_upstreams(*, include_default: bool = True) -> list[dict]:
 
 def create_upstream(name: object, base_url: object, api_key: object = '',
                     note: object = '', enabled: object = True,
-                    auth_dir: object = '', container: object = '') -> dict:
+                    auth_dir: object = '', container: object = '', *, platform: str = 'wb') -> dict:
+    platform = platforms.normalize(platform)
+    if platform == 'ca' and (auth_dir or container):
+        raise ValueError('CA 账号由 CodeArts 服务管理，请不要填写 WB 账号目录或容器')
     nm = _clean(name, MAX_NAME)
     if not nm:
         raise ValueError('上游名称不能为空')
@@ -162,10 +168,10 @@ def create_upstream(name: object, base_url: object, api_key: object = '',
     now = int(time.time())
     uid = db.execute(
         'INSERT INTO upstreams(name, base_url, api_key, note, enabled, auth_dir, container, '
-        'created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'created_at, updated_at, platform) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         (nm, url, _clean(api_key, MAX_URL), _clean(note, MAX_NOTE),
          1 if enabled else 0, normalize_auth_dir(auth_dir), normalize_container(container),
-         now, now),
+         now, now, platform),
     )
     row = db.query_one('SELECT * FROM upstreams WHERE id = ?', (uid,))
     return _row_to_dict(row)
@@ -181,6 +187,16 @@ def update_upstream(upstream_id: object, patch: dict) -> dict | None:
     if current is None:
         return None
     fields: dict[str, object] = {}
+    selected = platforms.normalize(patch.get('platform', current.get('platform')))
+    if selected != current.get('platform', 'wb') and bound_key_count(current['id']):
+        raise ValueError('该上游仍被密钥引用，不能更改平台')
+    if 'platform' in patch:
+        fields['platform'] = selected
+    if selected == 'ca':
+        if patch.get('auth_dir') or patch.get('container'):
+            raise ValueError('CA 上游不能配置 WB 账号目录或容器')
+        fields['auth_dir'] = ''
+        fields['container'] = ''
     if 'name' in patch:
         nm = _clean(patch['name'], MAX_NAME)
         if not nm:
@@ -270,7 +286,13 @@ def resolve_for_key(key: dict | None) -> dict:
     """
     uid = (key or {}).get('upstream_id')
     if uid in (None, '', 0, '0'):
-        return default_upstream()
+        if platforms.key_platform(key) == 'ca':
+            try:
+                uid = platforms.codearts_upstream_id()
+            except ValueError as exc:
+                raise UpstreamUnavailable(str(exc)) from exc
+        else:
+            return default_upstream()
     row = get_upstream(uid)
     if row is None:
         raise UpstreamUnavailable(
@@ -279,6 +301,8 @@ def resolve_for_key(key: dict | None) -> dict:
     if not row['enabled']:
         raise UpstreamUnavailable(
             f'密钥绑定的上游「{row["name"]}」已停用 —— 启用它，或把密钥改绑到其它上游')
+    if platforms.upstream_platform(row) != platforms.key_platform(key):
+        raise UpstreamUnavailable('密钥与上游平台不一致，请重新绑定 WB／CA 上游')
     return row
 
 
@@ -303,7 +327,7 @@ def forward_api_key(upstream: dict | None) -> str:
     key = str((upstream or {}).get('api_key') or '')
     if key or not upstream or upstream.get('is_default'):
         return key
-    if _same_base(upstream.get('base_url'), default_upstream().get('base_url')):
+    if platforms.upstream_platform(upstream) == 'wb' and _same_base(upstream.get('base_url'), default_upstream().get('base_url')):
         return str(default_upstream().get('api_key') or '')
     return ''
 

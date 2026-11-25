@@ -6,6 +6,7 @@
  * 因此本文件里不要写死任何语言：日期、数字、时长、相对时间都跟随界面语言。
  */
 import {intlLocale, t} from '@/lib/i18n';
+export {copyText} from './clipboard';
 
 /** 秒级时长格式化：已过期 / 分钟 / 小时 / 天 */
 export function fmtRemain(seconds: number): string {
@@ -216,46 +217,6 @@ export function fmtAgo(ts: number | null | undefined): string {
  *   2. 回退到 `execCommand('copy')`，并**检查它的布尔返回值**。
  * 都失败返回 `false`，由调用方如实提示（文案引导手动选择复制）。
  */
-export async function copyText(text: string): Promise<boolean> {
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch {
-      /* 落到下面的回退路径 */
-    }
-  }
-
-  const ta = document.createElement('textarea');
-  ta.value = text;
-  // 只读：避免移动端弹键盘；移出可视区且透明：不闪、不占位
-  ta.setAttribute('readonly', '');
-  ta.style.position = 'fixed';
-  ta.style.top = '0';
-  ta.style.left = '-9999px';
-  ta.style.opacity = '0';
-  document.body.appendChild(ta);
-
-  const sel = document.getSelection();
-  const saved = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
-  let ok = false;
-  try {
-    ta.select();
-    ta.setSelectionRange(0, text.length);
-    ok = document.execCommand('copy') === true;
-  } catch {
-    ok = false;
-  } finally {
-    document.body.removeChild(ta);
-    // 恢复用户原来的选区：复制是旁路动作，不该把界面上已有的选择弄丢
-    if (saved && sel) {
-      sel.removeAllRanges();
-      sel.addRange(saved);
-    }
-  }
-  return ok;
-}
-
 /**
  * 扣费金额格式化（上游 usage.credit）。
  * 单次调用常是 0.0x 量级，直接 toLocaleString 会显示成 0，因此小数值保留

@@ -20,7 +20,7 @@ import {Area, ComposedChart, Line, ResponsiveContainer, Tooltip, YAxis} from 're
 
 import {StatCard} from './StatCard';
 import {statsApi} from '@/lib/api';
-import type {StatsRealtime} from '@/lib/types';
+import type {Platform, StatsRealtime} from '@/lib/types';
 import {fmtAgo, fmtNumber} from '@/lib/format';
 import {useHeartbeat} from '@/lib/use-heartbeat';
 import {useT} from '@/lib/i18n/provider';
@@ -50,7 +50,7 @@ function clockOf(epoch: number): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-export function RealtimeStatsStrip({days}: {days: number}) {
+export function RealtimeStatsStrip({days, platform = 'wb'}: {days: number; platform?: Platform}) {
   const t = useT();
   const [data, setData] = useState<StatsRealtime | null>(null);
   const [failed, setFailed] = useState(false);
@@ -88,7 +88,7 @@ export function RealtimeStatsStrip({days}: {days: number}) {
     busy.current = true;
     busyOwner.current = ticket;
     statsApi
-      .realtime(days)
+      .realtime(days, platform)
       .then((next) => {
         if (ticket !== seq.current) return;
         setData(next);
@@ -102,7 +102,7 @@ export function RealtimeStatsStrip({days}: {days: number}) {
         // 只由「当前 owner」解锁：被强制取代的旧请求不能清掉新请求的忙标志
         if (busyOwner.current === ticket) busy.current = false;
       });
-  }, [days]);
+  }, [days, platform]);
 
   // 换时段要立刻重取（强制，不受在途守卫阻挡）：留着上一个时段的峰值会和下面的表对不上
   useEffect(() => {
@@ -152,7 +152,7 @@ export function RealtimeStatsStrip({days}: {days: number}) {
     } else {
       // 没有 error 文本时也要说明「上游不可达」，否则只剩一行「客户端在途 N」，
       // 读者不知道主数字为什么是「—」。
-      parts.push(data.error || t('stats.realtimeUnavailable'));
+      parts.push(platform === 'ca' ? t('ca.capacityUnknown') : data.error || t('stats.realtimeUnavailable'));
     }
     // 请求失败时数字是**上一次成功**的，明确标出「多久以前」，否则读者会把它
     // 当作此刻的值。
@@ -172,7 +172,7 @@ export function RealtimeStatsStrip({days}: {days: number}) {
     <section className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">
       <StatCard
         label={t('stats.realtimeConcurrency')}
-        value={available ? fmtNumber(data?.inflight) : '—'}
+        value={platform === 'ca' && data ? fmtNumber(data.client_inflight) : available ? fmtNumber(data?.inflight) : '—'}
         hint={concHint}
         // 请求失败时也标红：界面会继续显示上一次成功的数字，没有任何提示的话
         // 读者会把它当成「此刻的值」

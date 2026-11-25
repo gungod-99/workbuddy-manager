@@ -19,19 +19,23 @@ import threading
 
 _LOCK = threading.Lock()
 _COUNT = 0
+_PLATFORMS = {'wb': 0, 'ca': 0}
 
 
-def enter() -> None:
+def enter(platform: str = 'wb') -> None:
     global _COUNT
     with _LOCK:
         _COUNT += 1
+        _PLATFORMS['ca' if platform == 'ca' else 'wb'] += 1
 
 
-def leave() -> None:
+def leave(platform: str = 'wb') -> None:
     global _COUNT
     with _LOCK:
-        if _COUNT > 0:
+        selected = 'ca' if platform == 'ca' else 'wb'
+        if _PLATFORMS[selected] > 0:
             _COUNT -= 1
+            _PLATFORMS[selected] -= 1
         else:
             # 不配对必须能看见：静默吞掉下溢会让计数**永久少 1**，之后所有
             # 「客户端在途」都偏低，而界面上完全看不出异常。走到这里说明
@@ -41,5 +45,6 @@ def leave() -> None:
                 '统计值会偏低')
 
 
-def current() -> int:
-    return _COUNT
+def current(platform: str | None = None) -> int:
+    with _LOCK:
+        return _COUNT if platform is None else _PLATFORMS.get(platform, 0)

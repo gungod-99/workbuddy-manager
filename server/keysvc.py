@@ -9,6 +9,7 @@ import sqlite3
 import time
 
 from . import db
+from .services import platforms
 from .iputil import ip_matches
 
 TOKEN_PREFIX = 'wbk_'
@@ -286,6 +287,7 @@ def _parse(row) -> dict:
         'ip_allowlist': _json_list(row['ip_allowlist']),
         'models': _json_list(row['models']),
         'realm': _norm_realm(row['realm']),
+        'platform': platforms.normalize(_row_get(row, 'platform') or 'wb'),
         # 绑定的上游接入点（多上游 / 分组隔离）。None = 默认上游 —— 见 upstreamsvc
         # 的模块注释：默认上游不是数据库里的某一行，所以这里保持 None 而不是补 0。
         'upstream_id': _norm_upstream_id(row['upstream_id']),
@@ -322,6 +324,11 @@ def list_keys() -> list[dict]:
     return out
 
 
+def get_key(key_id: int) -> dict | None:
+    row = db.query_one('SELECT * FROM api_keys WHERE id = ?', (key_id,))
+    return _parse(row) if row else None
+
+
 def create_key(
     name: str,
     expires_at: int | None = None,
@@ -335,6 +342,7 @@ def create_key(
     daily_quota: int = 0,
     custom_token: str | None = None,
     *,
+    platform: str = 'wb',
     _conn: sqlite3.Connection | None = None,
 ) -> dict:
     """创建一个密钥。返回含**明文 token** 的字典。
@@ -356,12 +364,15 @@ def create_key(
     （见 `_norm_custom_token`）——那条路径的成本是把「生成随机串」换成「接受输入」，
     安全性不能跟着降级。
     """
+    platform = platforms.normalize(platform)
+    if platform == 'ca':
+        realm = ''
     token = _norm_custom_token(custom_token) if custom_token is not None \
-        else TOKEN_PREFIX + secrets.token_urlsafe(32)
+        else ('cak_' if platform == 'ca' else TOKEN_PREFIX) + secrets.token_urlsafe(32)
     sql = ('INSERT INTO api_keys(name, key_hash, key_plain, prefix, enabled, expires_at, '
            'max_ips, ip_allowlist, models, realm, quota, used_tokens, quota_credit, '
-           'used_credit, created_at, upstream_id, daily_quota) '
-           'VALUES(?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?)')
+           'used_credit, created_at, upstream_id, daily_quota, platform) '
+           'VALUES(?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?, ?)')
     args = (
         name,
         _hash(token),
@@ -377,6 +388,7 @@ def create_key(
         int(time.time()),
         _norm_upstream_id(upstream_id),
         _norm_daily_quota(daily_quota),
+        platform,
     )
     if _conn is not None:
         try:
@@ -427,6 +439,10 @@ def update_key(key_id: int, patch: dict) -> dict | None:
     if not row:
         return None
     fields: dict[str, object] = {}
+    if 'platform' in patch:
+        fields['platform'] = platforms.normalize(patch['platform'])
+        if fields['platform'] == 'ca':
+            fields['realm'] = ''
     if 'name' in patch and patch['name']:
         fields['name'] = str(patch['name'])
     if 'enabled' in patch:
@@ -443,7 +459,7 @@ def update_key(key_id: int, patch: dict) -> dict | None:
     if 'realm' in patch:
         # 显式传 null/'' 是**允许**的：管理员可以把旧密钥改回「不限制」。
         # 所以这里不能用 `patch['realm'] or ...` 之类的真值判断。
-        fields['realm'] = _norm_realm(patch['realm'])
+        fields['realm'] = '' if platforms.normalize(patch.get('platform', row['platform'])) == 'ca' else _norm_realm(patch['realm'])
     if 'quota' in patch:
         fields['quota'] = int(patch['quota'] or 0)
     if 'quota_credit' in patch:
@@ -540,6 +556,8 @@ def model_allowed(key: dict, model: object) -> bool:
     白名单为空 = 不限制，一律放行。
     """
     allow = key.get('models') or []
+    if platforms.key_platform(key) == 'ca':
+        return isinstance(model, str) and model.startswith('codearts/') and (not allow or model in allow)
     if not allow:
         return True
     if not isinstance(model, str) or not model.strip():
@@ -737,7 +755,10 @@ def validate(key: dict, ip: str, model: str | None,
     # 真正路由的是映射目标（issue #47）。所以这里用 mapped_model —— 否则配了
     # 「别名 → 带前缀的真名」的密钥永远被判成错版本。
     effective = (mapped_model or model)
-    want = _norm_realm(key.get('realm'))
+    platform_error = None if is_model_list else platforms.check_model(key, model, effective)
+    if platform_error:
+        return Rejection(platform_error, 400, 'invalid_request_error', 'platform_mismatch')
+    want = '' if platforms.key_platform(key) == 'ca' else _norm_realm(key.get('realm'))
     if want and not is_model_list:
         if not isinstance(effective, str) or not effective.strip():
             return Rejection(

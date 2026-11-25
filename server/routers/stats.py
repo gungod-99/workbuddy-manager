@@ -5,10 +5,10 @@ import datetime
 import json
 import time
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from .. import config, db, inflight, security
-from ..services import pricing, wb2api
+from ..services import platforms, pricing, wb2api
 
 router = APIRouter(prefix='/api/stats', tags=['stats'])
 
@@ -89,7 +89,7 @@ def _throughput_by_model(days: int, realm: str | None,
     lo, hi, _span = _range_bounds(days, start, end)
     since = int(time.mktime(time.strptime(lo, '%Y-%m-%d')))
     until = int(time.mktime(time.strptime(hi, '%Y-%m-%d'))) + 86400
-    rf = ' AND realm = ?' if realm in ('cn', 'global') else ''
+    rf = ' AND realm = ?' if realm in ('cn', 'global', 'ca') else ''
     args: tuple = (since, until) + ((realm,) if rf else ())
     rows = db.query(
         'SELECT model AS name, COUNT(*) AS samples, '
@@ -137,7 +137,7 @@ def summary(realm: str | None = None,
     today = time.strftime('%Y-%m-%d')
     week = _since(7)
     # 过滤片段：realm 为空不过滤（保持既有行为），非空则按列匹配
-    rf = ' AND realm = ?' if realm in ('cn', 'global') else ''
+    rf = ' AND realm = ?' if realm in ('cn', 'global', 'ca') else ''
     rargs: tuple = (realm,) if rf else ()
 
     def agg(where: str, args: tuple) -> tuple[int, int, float, float | None, int]:
@@ -164,7 +164,7 @@ def summary(realm: str | None = None,
     # 活跃密钥：密钥本身**不分版本**（同一把密钥可调两个版本，由模型名决定路由），
     # 所以按版本时应统计「**该版本有调用**的密钥数」，而不是「属于该版本的密钥数」
     # ——后者在架构上不存在。如实标注口径，避免让人以为密钥是隔离的。
-    if realm in ('cn', 'global'):
+    if realm in ('cn', 'global', 'ca'):
         active_keys = db.query_one(
             'SELECT COUNT(DISTINCT key_id) AS c FROM usage_daily WHERE realm = ?',
             (realm,),
@@ -239,7 +239,7 @@ def _failures(realm: str | None = None) -> dict:
         # ——**必须写成 `COALESCE(realm,'cn') = ?`，不能写成 `COALESCE(realm,?) = ?`**：
         # 后者会把 NULL 兜成「当前查询的那个版本」，于是看国际版时历史 NULL 行
         # 也被算进来（实测：只看 global 却统计到 cn 的历史记录）。
-        rf = " AND COALESCE(realm, 'cn') = ?" if realm in ('cn', 'global') else ''
+        rf = " AND COALESCE(realm, 'cn') = ?" if realm in ('cn', 'global', 'ca') else ''
         for label, since in (('today', today), ('week', week)):
             # 用 `ts >= 当地零点` 而不是 `day_sql(ts) >= 日期串`：两者逐行等价
             # （见 test_day_filter_equivalence.py 的边界样本），但后者把 ts 包在
@@ -288,7 +288,7 @@ def _usage_health(today: str, today_requests: int, realm: str | None = None) -> 
     """
     try:
         # 与用量同一口径：看某版本时只看该版本（COALESCE 把历史 NULL 归 cn）
-        rgt = ' AND COALESCE(realm, ?) = ?' if realm in ('cn', 'global') else ''
+        rgt = ' AND COALESCE(realm, ?) = ?' if realm in ('cn', 'global', 'ca') else ''
         # 只数「本该累计」的：与 _record 的 `if key:` 且 `if total or credit:` 对齐
         should = (
             'key_id IS NOT NULL'
@@ -310,7 +310,7 @@ def _usage_health(today: str, today_requests: int, realm: str | None = None) -> 
     except Exception:  # noqa: BLE001
         return {'ok': True, 'detail': '', 'logs_today': 0}
     if n > 0 and today_requests == 0:
-        scope = {'cn': '国内版', 'global': '国际版'}.get(str(realm or ''), '')
+        scope = {'cn': '国内版', 'global': '国际版', 'ca': 'CA 平台'}.get(str(realm or ''), '')
         return {
             'ok': False,
             'logs_today': n,
@@ -351,7 +351,7 @@ def daily(days: int = 30, realm: str | None = None,
     曲线是空的，看不出出过事。
     """
     lo, hi, _span = _range_bounds(days, start, end)
-    rf = ' AND realm = ?' if realm in ('cn', 'global') else ''
+    rf = ' AND realm = ?' if realm in ('cn', 'global', 'ca') else ''
     args = (lo, hi) + ((realm,) if rf else ())
     rows = db.query(
         'SELECT day, SUM(requests) AS requests, '
@@ -398,7 +398,7 @@ def _daily_failures(days: int, realm: str | None = None,
     """按天统计失败请求数（4xx + 5xx）。口径与 `_failures` 一致。"""
     try:
         # 同 `_failures`：NULL 固定归 cn，不能把 NULL 兜成查询目标版本
-        rf = " AND COALESCE(realm, 'cn') = ?" if realm in ('cn', 'global') else ''
+        rf = " AND COALESCE(realm, 'cn') = ?" if realm in ('cn', 'global', 'ca') else ''
         # 过滤用 ts 范围（走索引），**分组**仍必须用日期表达式（要按天聚合，
         # 这个没法避免）。两者分开：过滤是热路径上的大头，分组只作用于过滤后的行。
         lo, hi, _span = _range_bounds(days, start, end)
@@ -418,7 +418,7 @@ def _daily_success(days: int, realm: str | None = None,
                    start: str | None = None, end: str | None = None) -> dict[str, int]:
     """按天统计成功请求数（2xx）。与 `_daily_failures` 同源（request_logs），口径对称。"""
     try:
-        rf = " AND COALESCE(realm, 'cn') = ?" if realm in ('cn', 'global') else ''
+        rf = " AND COALESCE(realm, 'cn') = ?" if realm in ('cn', 'global', 'ca') else ''
         lo, hi, _span = _range_bounds(days, start, end)
         args = (db.day_start_ts(lo), db.day_start_ts(hi) + 86400) + ((realm,) if rf else ())
         rows = db.query(
@@ -452,7 +452,7 @@ def hourly(day: str | None = None, realm: str | None = None,
     # （趋势图不该因为一个手改的 URL 变成红色错误态）。
     if len(d) != 10 or d[4] != '-' or d[7] != '-':
         d = time.strftime('%Y-%m-%d')
-    rf = ' AND realm = ?' if realm in ('cn', 'global') else ''
+    rf = ' AND realm = ?' if realm in ('cn', 'global', 'ca') else ''
     rargs: tuple = (realm,) if rf else ()
     rows = db.query(
         'SELECT hour, SUM(requests) AS requests, '
@@ -489,7 +489,7 @@ def hourly(day: str | None = None, realm: str | None = None,
 def _hourly_success(day: str, realm: str | None = None) -> dict[int, int]:
     """某天**按小时**的成功请求数（2xx）。与 `_hourly_failures` 对称。"""
     try:
-        rf = " AND COALESCE(realm, 'cn') = ?" if realm in ('cn', 'global') else ''
+        rf = " AND COALESCE(realm, 'cn') = ?" if realm in ('cn', 'global', 'ca') else ''
         args = (db.day_start_ts(day), db.day_start_ts(day) + 86400) + ((realm,) if rf else ())
         rows = db.query(
             f"SELECT {db.hour_sql('ts')} AS bucket, COUNT(*) AS n FROM request_logs "
@@ -510,7 +510,7 @@ def _hourly_success(day: str, realm: str | None = None) -> dict[int, int]:
 def _hourly_failures(day: str, realm: str | None = None) -> dict[int, int]:
     """某天**按小时**的失败请求数（4xx + 5xx）。口径与 `_failures` 一致。"""
     try:
-        rf = " AND COALESCE(realm, 'cn') = ?" if realm in ('cn', 'global') else ''
+        rf = " AND COALESCE(realm, 'cn') = ?" if realm in ('cn', 'global', 'ca') else ''
         # 过滤用 ts 范围（走索引），分组用小时表达式（要聚合，躲不开）
         args = (db.day_start_ts(day), db.day_start_ts(day) + 86400) + ((realm,) if rf else ())
         rows = db.query(
@@ -547,6 +547,9 @@ def _realm_uids(realm: str | None) -> set[str] | None:
     的 uid 由 credits.record_balance 写入，是**完整 uid**，所以可以精确匹配，
     不需要像上游日志那样兼容 8 位前缀。
     """
+    # CA 没有 WB 的签到积分收入，不能把全体 WB task_logs 合进 CA。
+    if realm == 'ca':
+        return set()
     if realm not in ('cn', 'global'):
         return None
     try:
@@ -588,7 +591,7 @@ def _credits_hourly(day: str, realm: str | None) -> list[dict]:
     支出取 `usage_hourly.credit`：它与 `usage_daily` 由同一处写入累计，
     所以按小时求和与按天求和天然一致；收入按余额查询发生的小时归档。
     """
-    rf = ' AND realm = ?' if realm in ('cn', 'global') else ''
+    rf = ' AND realm = ?' if realm in ('cn', 'global', 'ca') else ''
     rargs: tuple = (realm,) if rf else ()
     expense: dict[int, float] = {}
     for r in db.query(
@@ -649,7 +652,7 @@ def credits_flow(days: int = 30, realm: str | None = None,
     today = time.strftime('%Y-%m-%d')
 
     # 支出：usage_daily 带 realm 列，可直接筛
-    rf = ' AND realm = ?' if realm in ('cn', 'global') else ''
+    rf = ' AND realm = ?' if realm in ('cn', 'global', 'ca') else ''
     rargs: tuple = (realm,) if rf else ()
     expense = {
         str(r['day']): float(r['credit'] or 0)
@@ -702,7 +705,7 @@ def by_model(days: int = 30, realm: str | None = None,
              user: dict = Depends(security.current_user)) -> list[dict]:
     """按模型聚合。realm 非空时只统计该版本。"""
     lo, hi, _span = _range_bounds(days, start, end)
-    rf = ' AND realm = ?' if realm in ('cn', 'global') else ''
+    rf = ' AND realm = ?' if realm in ('cn', 'global', 'ca') else ''
     args = (lo, hi) + ((realm,) if rf else ())
     rows = db.query(
         'SELECT model AS name, SUM(requests) AS requests, '
@@ -748,7 +751,7 @@ def by_account(days: int = 30, realm: str | None = None,
     """
     import re as _re
     lo, hi, _span = _range_bounds(days, start, end)
-    rf = " AND COALESCE(realm, 'cn') = ?" if realm in ('cn', 'global') else ''
+    rf = " AND COALESCE(realm, 'cn') = ?" if realm in ('cn', 'global', 'ca') else ''
     capped = max(1, min(int(limit or 1000), 5000))
     args: tuple = (db.day_start_ts(lo), db.day_start_ts(hi) + 86400)
     if rf:
@@ -792,7 +795,7 @@ def by_account_model(days: int = 30, realm: str | None = None,
     """
     import re as _re
     lo, hi, _span = _range_bounds(days, start, end)
-    rf = " AND COALESCE(realm, 'cn') = ?" if realm in ('cn', 'global') else ''
+    rf = " AND COALESCE(realm, 'cn') = ?" if realm in ('cn', 'global', 'ca') else ''
     capped = max(1, min(int(limit or 2000), 10000))
     args: tuple = (db.day_start_ts(lo), db.day_start_ts(hi) + 86400)
     if rf:
@@ -836,7 +839,7 @@ def by_key(days: int = 30, realm: str | None = None,
     反映架构，不是重复计数。
     """
     lo, hi, _span = _range_bounds(days, start, end)
-    rf = ' AND u.realm = ?' if realm in ('cn', 'global') else ''
+    rf = ' AND u.realm = ?' if realm in ('cn', 'global', 'ca') else ''
     args = (lo, hi) + ((realm,) if rf else ())
     rows = db.query(
         'SELECT COALESCE(k.name, u.key_id || "") AS name, SUM(u.requests) AS requests, '
@@ -892,7 +895,15 @@ async def upstream_stats(user: dict = Depends(security.current_user)) -> dict:
 
 # 峰值要扫整个时段的 `request_logs`，窗口越长越贵；同一时段的界面每 5 秒刷一次，
 # 不缓存就变成每 5 秒一次全窗口扫描。缓存 60 秒足够——峰值本来就是分钟级指标。
-_PEAK_CACHE: dict[int, tuple[float, dict]] = {}
+_PEAK_CACHE: dict[object, tuple[float, dict]] = {}
+
+
+def _platform_filter(platform: str | None) -> tuple[str, tuple]:
+    if platform == 'ca':
+        return " AND COALESCE(realm, 'cn') = ?", ('ca',)
+    if platform == 'wb':
+        return " AND COALESCE(realm, 'cn') != ?", ('ca',)
+    return '', ()
 
 
 def _per_account_limit() -> dict[str, int]:
@@ -978,7 +989,7 @@ def _max_overlap(spans) -> int:
     return peak
 
 
-def _peaks(days: int) -> dict:
+def _peaks(days: int, platform: str | None = None) -> dict:
     """窗口内的并发峰值与 RPM 峰值，结果缓存 60 秒。
 
     并发用区间重叠扫描：每个请求占 `[ts - latency, ts)`，求最大重叠数。同一时刻
@@ -993,13 +1004,15 @@ def _peaks(days: int) -> dict:
     `(t, delta)` 排序（`-1` 排在 `+1` 前，正是半开区间要的次序），再用窗口函数求
     前缀和的最大值。全程不把行搬进 Python，内存只取决于聚合结果行数。
     """
-    key = max(1, min(90, int(days)))
+    span = max(1, min(90, int(days)))
+    key = span if platform is None else (span, platform)
     hit = _PEAK_CACHE.get(key)
     now = time.time()
     if hit and now - hit[0] < 60:
         return hit[1]
 
-    since = _epoch_since(key)
+    since = _epoch_since(span)
+    rf, rargs = _platform_filter(platform)
     # 并发峰值：开始 +1 / 结束 -1，按时刻排序后求前缀和的最大值（区间最大重叠）。
     #
     # 区间是 `[ts - latency, ts)`：`ts` 是请求**结束**的时刻（见 `gateway._record()`
@@ -1018,26 +1031,26 @@ def _peaks(days: int) -> dict:
     #      所以零时长按「极小但非零」的时长处理（1 毫秒）：并发峰值是「同一时刻
     #      最多几条请求在处理」，一条已经在跑的请求至少要算 1。
     row = db.query_one(
-        """
+        f"""
         WITH ev AS (
             SELECT ts * 1.0 - MAX(COALESCE(latency_ms, 0), 1) / 1000.0 AS t, 1 AS d
-              FROM request_logs WHERE ts >= ?
+              FROM request_logs WHERE ts >= ?{rf}
             UNION ALL
-            SELECT ts * 1.0 AS t, -1 FROM request_logs WHERE ts >= ?
+            SELECT ts * 1.0 AS t, -1 FROM request_logs WHERE ts >= ?{rf}
         ),
         running AS (
             SELECT d, SUM(d) OVER (ORDER BY t, d) AS cur FROM ev
         )
         SELECT COALESCE(MAX(cur), 0) AS peak FROM running
-        """, (since, since))
+        """, (since,) + rargs + (since,) + rargs)
     peak = int((row or {'peak': 0})['peak'] or 0)
 
     # RPM 峰值：某一分钟最多几条（按开始时刻分桶）
     row = db.query_one(
-        'SELECT COUNT(*) AS n FROM request_logs WHERE ts >= ? '
-        'GROUP BY ts / 60 ORDER BY n DESC LIMIT 1', (since,))
+        f'SELECT COUNT(*) AS n FROM request_logs WHERE ts >= ?{rf} '
+        'GROUP BY ts / 60 ORDER BY n DESC LIMIT 1', (since,) + rargs)
     rpm_peak = int((row or {'n': 0})['n'] or 0)
-    row = db.query_one('SELECT COUNT(*) AS n FROM request_logs WHERE ts >= ?', (since,))
+    row = db.query_one(f'SELECT COUNT(*) AS n FROM request_logs WHERE ts >= ?{rf}', (since,) + rargs)
     samples = int((row or {'n': 0})['n'] or 0)
 
     out = {'concurrency': peak, 'rpm': rpm_peak, 'samples': samples}
@@ -1051,10 +1064,10 @@ def _peaks(days: int) -> dict:
 #
 # 键里带 (window, step)：将来若别处用不同参数调，不会互相串味。
 _SERIES_TTL = 1.0
-_series_cache: dict[tuple[int, int], tuple[float, dict]] = {}
+_series_cache: dict[tuple, tuple[float, dict]] = {}
 
 
-def _series(window: int = 180, step: int = 15) -> dict:
+def _series(window: int = 180, step: int = 15, platform: str | None = None) -> dict:
     """近 `window` 秒的「每分钟完成数」与**并发**序列，每 `step` 秒一个桶。
 
     三处刻意的算法选择：
@@ -1067,7 +1080,7 @@ def _series(window: int = 180, step: int = 15) -> dict:
     3. `rpm` 按**完成时刻**落桶：它回答的是「这一格完成了多少条」，与并发不是同一
        量纲，别把它当「请求数」和并发相加。
     """
-    cache_key = (window, step)
+    cache_key = (window, step, platform)
     cached = _series_cache.get(cache_key)
     if cached is not None and time.time() - cached[0] < _SERIES_TTL:
         return cached[1]
@@ -1077,8 +1090,9 @@ def _series(window: int = 180, step: int = 15) -> dict:
     start = end - window
     nb = max(1, window // step)
     # 多取一个窗口：长请求可能早于 start 开始（它的 ts 是结束时刻）
-    rows = db.query('SELECT ts, latency_ms FROM request_logs WHERE ts >= ?',
-                    (start - max(60, window),))
+    rf, rargs = _platform_filter(platform)
+    rows = db.query(f'SELECT ts, latency_ms FROM request_logs WHERE ts >= ?{rf}',
+                    (start - max(60, window),) + rargs)
     spans = _request_spans(rows)
 
     rpm = [0] * nb
@@ -1150,6 +1164,7 @@ async def _upstream_status_cached() -> dict:
 
 @router.get('/realtime')
 async def realtime(days: int | None = None,
+                   platform: str = 'wb',
                    user: dict = Depends(security.current_user)) -> dict:
     """实时并发 / RPM / 峰值 / 近 3 分钟走势。
 
@@ -1158,27 +1173,37 @@ async def realtime(days: int | None = None,
     「容量」标成未知，其余照常显示——比整块空白更有用（上游挂掉的时候，用户正是
     最想知道「刚才还在处理多少请求」的时候）。
     """
+    try:
+        selected = platforms.normalize(platform)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     span = max(1, min(90, int(days or 1)))
     now = int(time.time())
-    minute = db.query_one('SELECT COUNT(*) AS n FROM request_logs WHERE ts > ?',
-                          (now - 60,))
-    five = db.query_one('SELECT COUNT(*) AS n FROM request_logs WHERE ts > ?',
-                        (now - 300,))
-    three = db.query_one('SELECT COUNT(*) AS n FROM request_logs WHERE ts > ?',
-                         (now - 180,))
+    rf, rargs = _platform_filter(selected)
+    minute = db.query_one(f'SELECT COUNT(*) AS n FROM request_logs WHERE ts > ?{rf}',
+                          (now - 60,) + rargs)
+    five = db.query_one(f'SELECT COUNT(*) AS n FROM request_logs WHERE ts > ?{rf}',
+                        (now - 300,) + rargs)
+    three = db.query_one(f'SELECT COUNT(*) AS n FROM request_logs WHERE ts > ?{rf}',
+                         (now - 180,) + rargs)
     out: dict = {
         'available': False,
         'days': span,
         'updated_at': now,
         # 客户端在途：面板正在处理、还没把响应写完的条数（含流式全过程、含排队）。
         # 与下面 available 时的 `inflight`（上游槽位占用）是两个视角，界面上分开展示。
-        'client_inflight': inflight.current(),
+        'platform': selected,
+        'client_inflight': inflight.current(selected),
         'rpm_60': int((minute or {'n': 0})['n'] or 0),
         'rpm_5m': round(int((five or {'n': 0})['n'] or 0) / 5.0, 1),
         'rpm_3m': round(int((three or {'n': 0})['n'] or 0) / 3.0, 1),
-        'peaks': _peaks(span),
-        'series': _series(),
+        'peaks': _peaks(span, selected),
+        'series': _series(platform=selected),
     }
+    if selected == 'ca':
+        # 官方 CA 网关未公布 WB /status 的槽位容量，不能借用 WB 的账号池数字。
+        out['error'] = 'CA 上游未提供槽位容量；下方显示 CA 密钥的在途与已完成调用'
+        return out
     status = await _upstream_status_cached()
     if not status.get('connected'):
         out['error'] = str(status.get('error') or '上游不可达')

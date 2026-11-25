@@ -16,7 +16,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from .. import config, db, iputil, keysvc, upstreamsvc
-from ..services import modelcatalog, modelmap, proxyroutes, tap as tap_svc
+from ..services import modelcatalog, modelmap, platforms, proxyroutes, tap as tap_svc
 from ..config import _env_int
 from ..routers.security import get_config as get_security_config
 
@@ -619,6 +619,8 @@ def _record(key: dict | None, ip: str, model: str, mapped: str, status: int, pt:
     """
     if credit is None:
         credit = _usage_credit(usage)
+    if platforms.key_platform(key) == 'ca' or platforms.model_platform(mapped or model) == 'ca':
+        account_expected = False
     cache_hit, cache_miss, cache_write = _usage_cache(usage)
     # 日志与用量统计必须用**同一个时刻**（issue #380）：费用按调用时刻的价目
     # 与峰谷档计价，两处各取一次 time.time() 会在整点/整点边界上算出两个价。
@@ -642,6 +644,12 @@ def _record(key: dict | None, ip: str, model: str, mapped: str, status: int, pt:
         # 清洗只影响入库文本，**不影响转发给上游的内容**（body 早已发走）。
         model_clean = db._clean(model, 128)
         realm = db.realm_of_model(db._clean(mapped, 128) or model_clean)
+        # 被平台边界拒绝的调用仍归到发起它的密钥平台，避免污染另一个平台的失败数。
+        if key:
+            if platforms.key_platform(key) == 'ca':
+                realm = 'ca'
+            elif realm == 'ca':
+                realm = 'cn'
         db.add_request_log(
             ts=log_ts,
             key_id=key['id'] if key else None,
@@ -806,6 +814,8 @@ def _map_model(model: str | None) -> str | None:
     实现 —— 三处各写一遍必然漂移，而漂移出来的错位（能调用、但客户端的模型清单里
     没有它）只有用户能发现。
     """
+    if isinstance(model, str) and model.startswith('codearts/'):
+        return model
     return modelmap.target_for(db.get_setting('model_map', {}) or {}, model)
 
 
@@ -1022,12 +1032,15 @@ async def list_models(request: Request):
         # 目录收缩（issue #239）：上游模型表可能仍列着腾讯已经下架的 id，
         # 客户端选中后才 503。模型中心直连腾讯的目录是当前可用的权威清单，
         # 取得到且来源是腾讯时按它裁一次；取不到就原样透传。
-        payload = await _drop_models_outside_catalog(payload, key)
+        if platforms.key_platform(key) == 'wb':
+            payload = await _drop_models_outside_catalog(payload, key)
         # 能力字段兜底（issue #211）：随包上游的版本可能比面板旧 —— 补丁只在上游
         # 侧时，下游经面板拿到的清单仍缺字段，客户端会整条跳过模型。
-        payload = _listing_compat_models(payload)
+        if platforms.key_platform(key) == 'wb':
+            payload = _listing_compat_models(payload)
         # 国内版 id 去掉 `cn:` 前缀，与模型中心显示的名字一致（裸名 = 国内版）。
-        payload = _bare_cn_model_ids(payload)
+        if platforms.key_platform(key) == 'wb':
+            payload = _bare_cn_model_ids(payload)
         # Anthropic 客户端（Claude Code 等）也会调这个路径，但期望的结构不同
         if request.headers.get('anthropic-version'):
             payload = _as_anthropic_models(payload)
@@ -1205,24 +1218,27 @@ def _scope_models(payload: object, key: dict | None) -> object:
     不该因为我们认不出结构就去改动上游的响应。
     """
     key = key or {}
-    want = keysvc._norm_realm(key.get('realm'))
+    selected = platforms.key_platform(key)
+    want = keysvc._norm_realm(key.get('realm')) if selected == 'wb' else ''
     allow = [str(x) for x in (key.get('models') or []) if str(x).strip()]
-    if not want and not allow:
-        return payload
     if not isinstance(payload, dict):
         return payload
     items = payload.get('data')
     if not isinstance(items, list):
         return payload
 
-    in_realm = [m for m in items
-                if isinstance(m, dict) and (not want or _model_realm_of(m) == want)]
+    in_realm = [m for m in items if isinstance(m, dict)
+                and isinstance(m.get('id'), str)
+                and platforms.check_model(key, m['id'], m['id']) is None
+                and (not want or _model_realm_of(m) == want)]
     if not allow:
         return {**payload, 'data': in_realm}
 
     scoped = [m for m in in_realm if keysvc.model_allowed(key, m.get('id'))]
     # 别名：白名单可能写的是下游熟悉的别名，它不在清单里，要补进来
-    scoped += _alias_entries(in_realm, allow)
+    if selected == 'wb':
+        scoped += [m for m in _alias_entries(in_realm, allow)
+                   if platforms.check_model(key, m.get('id'), _map_model(m.get('id'))) is None]
     return {**payload, 'data': scoped}
 
 
@@ -1363,6 +1379,8 @@ async def _chat(request: Request, upstream_path: str):
                                            mapped=mapped or '', ua=ua)
     if upstream_err:
         return upstream_err
+    if platforms.key_platform(key) == 'ca' and upstream_path == '/v2/chat/completions':
+        upstream_path = '/v1/chat/completions'
     url = f'{upstream["base_url"]}{upstream_path}'
     # 转发头只构造一次：既给 httpx，也给抓包（「网关发了什么请求头」是双视角的
     # 一半，另一处再造一份就可能与真正发出去的不一致）。
@@ -1464,6 +1482,13 @@ async def _chat(request: Request, upstream_path: str):
         rec_status = 404 if missing is not None else status_code
         _record(key, ip, requested_model or '', mapped or '', rec_status, 0, 0,
                 latency, ua, text[:500], True, effort=effort)
+        # Diagnostic capture must also include failures before the SSE stream starts.
+        tap_svc.capture(
+            body=client_body, headers=request.headers.items(), key=key, ua=ua,
+            path=upstream_path, protocol='chat', status=rec_status,
+            latency_ms=latency, stream=True, text=text, error=text[:500],
+            upstream_body=body, upstream_headers=up_headers, trace_id=trace_id,
+        )
         if missing is not None:
             return JSONResponse(missing, status_code=404)
         headers = _retry_after_header(
@@ -1615,6 +1640,9 @@ async def tools_search(request: Request):
     key, ip, err = _authorize(request, None, is_model_list=True)
     if err:
         return err
+    if platforms.key_platform(key) == 'ca':
+        return _oai_error('此搜索接口仅适用于 WB 平台', 400,
+                          'invalid_request_error', 'platform_mismatch')
 
     try:
         body = await request.json()

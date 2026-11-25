@@ -47,7 +47,7 @@ export function TaskRunnerPanel() {
    * 才能跑任务 —— 没有目录的分组只做密钥转发，脚本没有账号可读。
    */
   const [groupId, setGroupId] = useState<number | null>(null);
-  const groupList = useAsyncAll({groups: () => upstreamsApi.list()}, []);
+  const groupList = useAsyncAll({groups: () => upstreamsApi.list('wb')}, []);
   const groups = groupList.values.groups?.items ?? [];
   const runnableGroups = groups.filter((g) => g.auth_dir);
   const {status, busy, run, stop} = useTaskRun({target: 'ALL', upstreamId: groupId});

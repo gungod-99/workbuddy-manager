@@ -85,6 +85,8 @@ import {ReloginQueueDialog} from '@/components/common/accounts/ReloginQueue';
 import {ModelProbeDialog} from '@/components/common/accounts/ModelProbeDialog';
 import {useAuth} from '@/lib/auth-context';
 import {useRealm} from '@/lib/realm-context';
+import {usePlatform} from '@/lib/platform-context';
+import {CodeArtsAccounts} from '@/components/common/accounts/CodeArtsAccounts';
 import {useT} from '@/lib/i18n/provider';
 import {Button} from '@/components/ui/button';
 import {Badge} from '@/components/ui/badge';
@@ -142,6 +144,11 @@ function moveWithin(
 }
 
 export default function AccountsPage() {
+  const {platform} = usePlatform();
+  return platform === 'ca' ? <CodeArtsAccounts /> : <WorkBuddyAccounts />;
+}
+
+function WorkBuddyAccounts() {
   const {realm, label: realmName} = useRealm();
   const t = useT();
   const {isAdmin} = useAuth();
@@ -244,7 +251,7 @@ export default function AccountsPage() {
    * 会消失，而**如果这次请求恰好失败，切换条就再也回不来了**，用户被困在一个
    * 打不开的分组里。同理它也单独承担自己的失败，不把账号列表拖成错误态。
    */
-  const groupList = useAsyncAll({groups: () => upstreamsApi.list()}, []);
+  const groupList = useAsyncAll({groups: () => upstreamsApi.list('wb')}, []);
 
   /** 账号池；`undefined` = 还没取到（首屏加载中，或它自己失败了） */
   const accounts: Account[] | undefined = values.pool?.accounts;

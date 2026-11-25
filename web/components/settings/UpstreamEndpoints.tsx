@@ -119,6 +119,7 @@ export function UpstreamEndpoints() {
               <div className="min-w-0 space-y-0.5">
                 <div className="flex flex-wrap items-center gap-1.5">
                   <span className="text-sm font-medium">{item.name}</span>
+                  <Badge variant="outline" className="rounded-full text-[10px]">{(item.platform || 'wb').toUpperCase()}</Badge>
                   {item.is_default && (
                     <Badge variant="secondary" className="rounded-full text-[10px]">
                       {t('upstreams.defaultTag')}
@@ -145,7 +146,7 @@ export function UpstreamEndpoints() {
                   </div>
                 ) : (
                   <div className="truncate text-[11px] text-muted-foreground">
-                    {t('upstreams.noDirLine')}
+                    {t(item.platform === 'ca' ? 'ca.accountNote' : 'upstreams.noDirLine')}
                   </div>
                 )}
                 {item.note ? (

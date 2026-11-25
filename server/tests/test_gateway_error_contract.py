@@ -269,9 +269,12 @@ class GatewayErrorContractHTTPTest(unittest.TestCase):
     # ── 路由形状 ─────────────────────────────────────────
     def test_get_chat_returns_json_not_spa_html(self) -> None:
         r = self.c.get('/v1/chat/completions')
-        self.assertEqual(r.status_code, 404)
+        # 首次导入 app 时若未构建静态前端，就没有 SPA 路由，路由器会报告 405。
+        # 无论是否装载过静态路由，这个入口都必须返回形状一致的网关 JSON。
+        self.assertIn(r.status_code, (404, 405))
         self.assertIn('application/json', r.headers.get('content-type', ''))
-        self.assertEqual(r.json()['error']['code'], 'not_found')
+        self.assertEqual(r.json()['error']['code'],
+                         'not_found' if r.status_code == 404 else 'method_not_allowed')
 
     def test_wrong_method_returns_json(self) -> None:
         r = self.c.put('/v1/models')

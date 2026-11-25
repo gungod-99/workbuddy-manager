@@ -295,6 +295,7 @@ class UpdateEndToEndTest(unittest.TestCase):
 
         def update_with_failing_pip(rep):
             mod.run = fake_run
+            mod._in_venv = lambda: False  # 本用例明确模拟系统 Python 的两段安装。
             return orig_update(rep)
 
         mod.update_manager = update_with_failing_pip
@@ -337,6 +338,7 @@ class UpdateEndToEndTest(unittest.TestCase):
 
         def update_with_fake_pip(rep):
             mod.run = fake_run
+            mod._in_venv = lambda: False  # 与下方单独测试的 venv 分支隔离。
             mod._system_site_writable = lambda: writable
             return orig_update(rep)
 

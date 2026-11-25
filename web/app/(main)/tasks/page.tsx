@@ -1,5 +1,8 @@
 'use client';
 
+import {usePlatform} from '@/lib/platform-context';
+import {WbOnlyNotice} from '@/components/common/layout/WbOnlyNotice';
+
 import {useCallback, useEffect, useState} from 'react';
 import {
   CalendarCheck,
@@ -155,6 +158,12 @@ const EMPTY_LINES: string[] = [];
 const EMPTY_KINDS: Record<string, string> = {};
 
 export default function TasksPage() {
+  const {platform} = usePlatform();
+  const {t} = useI18n();
+  return platform === 'ca' ? <WbOnlyNotice title={t('nav.tasks')} /> : <WorkBuddyTasks />;
+}
+
+function WorkBuddyTasks() {
   const {isAdmin} = useAuth();
   const {realm, label: realmName} = useRealm();
   const {t} = useI18n();

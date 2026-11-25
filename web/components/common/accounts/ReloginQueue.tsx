@@ -288,6 +288,7 @@ export function ReloginQueueDialog({
               nickname: current.nickname,
               realm: current.realm ?? 'cn',
               file: current.file,
+              proxy: current.proxy,
               panel_disabled: current.disabled_by_panel === true,
             }
           : null}

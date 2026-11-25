@@ -85,8 +85,12 @@ jobs:
 
       - name: 后端单元测试
         run: |
-          python3 -m pip install --quiet -r server/requirements.txt
-          python3 -m unittest discover -s server/tests -t . -v
+          python3 -m pip install --quiet -r requirements-dev.txt
+          python3 -m pytest -q server/tests
+
+      - name: CA 前端与 HTTP 剪贴板回归
+        run: |
+          node --experimental-strip-types --test web/lib/codearts-dashboard.test.mjs web/lib/codearts-login.test.mjs web/lib/clipboard.test.mjs
 
       - name: 组装发布目录
         id: pack

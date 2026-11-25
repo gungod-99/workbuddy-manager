@@ -1,4 +1,5 @@
 'use client';
+import {copyText} from '@/lib/clipboard';
 
 import {useCallback, useEffect, useState} from 'react';
 import {
@@ -162,12 +163,8 @@ export function ProxyPanel() {
 
   async function copyRoute(route: ProxyRoute) {
     // 复制的是脱敏串：密码不进剪贴板（要完整地址得自己回上游 config.json 看）
-    try {
-      await navigator.clipboard.writeText(route.masked);
-      notify.ok(t('settings.proxyCopied'));
-    } catch (e) {
-      notify.err(errText(e));
-    }
+    if (await copyText(route.masked)) notify.ok(t('settings.proxyCopied'));
+    else notify.err(t('common.copyFailed'), t('common.manualCopy'));
   }
 
   async function remove(name: string, force: boolean) {

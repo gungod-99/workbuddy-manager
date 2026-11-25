@@ -143,3 +143,13 @@ start-all.cmd
 stop-all.cmd
 dev/.weight-task
 dev/.shots-weight-task
+
+# Local deployment snapshots and private provider state never belong in the fork.
+/.deploy-artifacts/
+/.deploy-tools/
+/test-venv/
+/codearts-state/
+/backups/
+/auths/
+.pytest_cache/
+admin-key

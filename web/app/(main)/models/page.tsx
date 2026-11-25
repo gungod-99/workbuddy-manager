@@ -32,6 +32,7 @@ import {
 import {modelApi} from '@/lib/api';
 import {useAsyncAll} from '@/lib/use-async-data';
 import {useRealm} from '@/lib/realm-context';
+import {usePlatform} from '@/lib/platform-context';
 import {notify} from '@/lib/toast';
 import {useT} from '@/lib/i18n/provider';
 import {cn} from '@/lib/utils';
@@ -103,6 +104,7 @@ function seriesLabel(series: string, t: (key: string) => string): string {
  */
 const SOURCE_KEYS: Record<string, string> = {
   tencent: 'models.sourceTencent',
+  codearts: 'ca.modelSource',
   upstream: 'models.sourceUpstream',
   none: 'models.sourceNone',
 };
@@ -116,7 +118,9 @@ function sourceLabel(source: string, fallback: string, t: (key: string) => strin
 
 export default function ModelsPage() {
   const t = useT();
-  const {realm, label: realmName} = useRealm();
+  const {realm, label} = useRealm();
+  const {platform} = usePlatform();
+  const realmName = platform === 'ca' ? t('platform.ca') : label;
 
   const [q, setQ] = useState('');
   const [series, setSeries] = useState('all');
@@ -148,8 +152,8 @@ export default function ModelsPage() {
    * 都很像空态，用户分不清「在取」「取不到」「确实没有」。
    */
   const {values, isInitialLoading, isInitialFailed, isRefreshing, reload} = useAsyncAll({
-    catalog: () => modelApi.catalog(realm, forceNext.current),
-  }, [realm]);
+    catalog: () => modelApi.catalog(realm, forceNext.current, platform),
+  }, [realm, platform]);
 
   const data: ModelCatalog | null = values.catalog ?? null;
 
@@ -166,7 +170,7 @@ export default function ModelsPage() {
     setSeries('all');
     setCap('all');
     setQ('');
-  }, [realm]);
+  }, [realm, platform]);
 
   /**
    * 强制刷新：绕过服务端缓存重新拉一次（与首屏那次区分开，只有它才绕缓存）。
@@ -291,7 +295,7 @@ export default function ModelsPage() {
         <div
           className={cn(
             'flex flex-wrap items-center gap-x-2 gap-y-1 rounded-[16px] border px-3.5 py-2.5 text-[11px]',
-            data.source === 'tencent'
+            data.source === 'tencent' || data.source === 'codearts'
               ? 'border-border bg-muted/60 text-muted-foreground'
               : 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400',
           )}
@@ -301,13 +305,14 @@ export default function ModelsPage() {
           </span>
           {data.via && <span>{t('models.sourceVia', {via: data.via})}</span>}
           {data.cached && <span>{t('models.sourceCached', {n: data.cache_age})}</span>}
-          {data.source !== 'tencent' && (
+          {data.source !== 'tencent' && data.source !== 'codearts' && (
             <span className="basis-full text-[10px] leading-4 opacity-90">
-              {data.source === 'upstream'
+              {platform === 'ca' ? t('ca.modelsEmpty') : data.source === 'upstream'
               ? t('models.fallbackNote')
                 : t('models.emptyNote')}
             </span>
           )}
+          {platform === 'ca' && <span className="basis-full text-[10px] leading-5">{t(data.models.length ? 'ca.modelNote' : 'ca.modelsEmpty')}</span>}
         </div>
       )}
 

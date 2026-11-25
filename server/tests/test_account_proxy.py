@@ -222,12 +222,7 @@ if __name__ == '__main__':
 
 
 class ProxyUiGatingTest(unittest.TestCase):
-    """「线路」这一列没东西可绑时**不能显示**（维护者复核补）。
-
-    线路表读自上游配置的 `proxies`；没配过时那个下拉里只有「直连」一项 —— 摆出来
-    就是纯噪声，还会让人以为能选却选不动。所以只在「有线路可选」或「确实有账号绑着
-    线路」（配置被移除后仍要看得见、改得回来）时显示。
-    """
+    """账号列表按需显示线路列；添加账号始终提供直连与默认出口选择。"""
 
     PAGE = Path(__file__).resolve().parents[2] / 'web' / 'app' / '(main)' / 'accounts' / 'page.tsx'
     DIALOG = (Path(__file__).resolve().parents[2] / 'web' / 'components' / 'common'
@@ -245,10 +240,12 @@ class ProxyUiGatingTest(unittest.TestCase):
         self.assertEqual(src.count('hasProxyUi &&'), 3,
                          '有渲染点没按 hasProxyUi 收口 —— 没东西可绑时仍会显示那一列')
 
-    def test_dialog_hides_the_selector_without_routes(self) -> None:
+    def test_dialog_keeps_direct_and_default_choices_without_named_routes(self) -> None:
         src = self.DIALOG.read_text(encoding='utf-8')
-        self.assertRegex(src, r'\{proxyRoutes\.length > 0 && \(',
-                         '添加账号弹窗在没有线路可选时仍会渲染那个下拉')
+        self.assertNotRegex(src, r'\{proxyRoutes\.length > 0 && \(',
+                            '添加账号时即使没有命名线路，也要允许区分直连与默认出口')
+        self.assertIn('<SelectItem value="__direct__">', src)
+        self.assertIn('<SelectItem value="default">', src)
 
 
 class LoginNetworkHintTest(unittest.TestCase):

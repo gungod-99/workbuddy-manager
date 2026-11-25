@@ -336,6 +336,15 @@ class WriteEndpointScopeMatrixTest(unittest.TestCase):
         'POST /api/settings/pg-sync/test',
         'POST /api/settings/pg-sync/export',
         'POST /api/settings/pg-sync/import',
+        # CA 授权和账号/领取设置涉及凭据及账号状态，统一要求管理员会话。
+        'POST /api/ca/auth/start',
+        'POST /api/ca/auth/{account_id}/callback',
+        'POST /api/ca/auth/{account_id}/cancel',
+        'PATCH /api/ca/accounts/{account_id}',
+        'DELETE /api/ca/accounts/{account_id}',
+        'POST /api/ca/accounts/{account_id}/refresh',
+        'POST /api/ca/checkin',
+        'PATCH /api/ca/auto-checkin',
     }
     # 写方法但只要求「已登录」——只读令牌也能调。必须逐个有理由。
     ANY_LOGGED_IN = {

@@ -13,12 +13,13 @@ from pydantic import BaseModel, Field
 
 from .. import security, upstreamsvc
 from ..iputil import client_ip
-from ..services import wb2api
+from ..services import wb2api, platforms
 
 router = APIRouter(prefix='/api/upstreams', tags=['upstreams'])
 
 
 class UpstreamIn(BaseModel):
+    platform: str = Field(default='wb', max_length=8)
     name: str = Field(min_length=1, max_length=64)
     base_url: str = Field(min_length=1, max_length=500)
     # 上游的 api_key。允许为空：少数自建上游不开鉴权，或者密钥先留空、稍后再填。
@@ -33,6 +34,7 @@ class UpstreamIn(BaseModel):
 
 
 class UpstreamPatch(BaseModel):
+    platform: str | None = None
     name: str | None = None
     base_url: str | None = None
     api_key: str | None = None
@@ -69,8 +71,15 @@ def _serialize(items: list[dict]) -> list[dict]:
 
 
 @router.get('')
-def list_upstreams(user: dict = Depends(security.current_user)) -> dict:
-    return {'items': _serialize(upstreamsvc.list_upstreams())}
+def list_upstreams(platform: str | None = None, user: dict = Depends(security.current_user)) -> dict:
+    items = upstreamsvc.list_upstreams()
+    if platform is not None:
+        try:
+            selected = platforms.normalize(platform)
+        except ValueError as exc:
+            raise HTTPException(400, detail=str(exc)) from exc
+        items = [u for u in items if platforms.upstream_platform(u) == selected]
+    return {'items': _serialize(items)}
 
 
 @router.post('')
@@ -83,6 +92,7 @@ def create_upstream(body: UpstreamIn, request: Request,
             name=body.name, base_url=body.base_url, api_key=body.api_key,
             note=body.note, enabled=body.enabled,
             auth_dir=body.auth_dir, container=body.container,
+            platform=body.platform,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

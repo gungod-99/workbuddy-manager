@@ -45,7 +45,7 @@ import {ConfirmDialog} from '@/components/common/layout/ConfirmDialog';
 import {LoadError} from '@/components/common/states/LoadError';
 import {SkeletonBar} from '@/components/common/states/SkeletonBar';
 import {useAuth} from '@/lib/auth-context';
-import {useRealm} from '@/lib/realm-context';
+import {useUsageScope} from '@/lib/platform-context';
 import {Button} from '@/components/ui/button';
 import {Input} from '@/components/ui/input';
 import {
@@ -112,7 +112,7 @@ function usageHealthDetail(
 export default function StatsPage() {
   const {isAdmin} = useAuth();
   // 统计随顶部版本切换：两个版本走的是不同账号池，混在一起看没有意义
-  const {realm, label: realmName} = useRealm();
+  const {realm, label: realmName, platform} = useUsageScope();
   const t = useT();
   /**
    * 时段。默认「今日」（issue #53）。
@@ -203,6 +203,7 @@ export default function StatsPage() {
   const {values: upstreamValues, reload: reloadUpstream} = useAsyncAll(
     {
       upstream: async () => {
+        if (platform === 'ca') return {available: false} as UpstreamStats;
         try {
           return await statsApi.upstream();
         } catch {
@@ -404,7 +405,7 @@ export default function StatsPage() {
 
       {/* 实时指标：口径与下面那排累计卡不同 —— 这两个数说的是「此刻」，由组件自己
           每 1 秒心跳一次，不跟本页 60 秒的刷新节奏走（标签页不可见时跳过）。 */}
-      <RealtimeStatsStrip days={d} />
+      <RealtimeStatsStrip key={platform} days={d} platform={platform} />
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4 md:gap-4">
         <StatCard
@@ -640,13 +641,13 @@ export default function StatsPage() {
       </section>
 
       {/* 按「日期 × 账号」聚合（issue #402）：看每个号每天用了多少、扣了多少积分。 */}
-      <AccountUsagePanel items={byAccount} />
-      <AccountModelUsagePanel items={byAccountModel} />
+      {platform === 'wb' && <AccountUsagePanel items={byAccount} />}
+      {platform === 'wb' && <AccountModelUsagePanel items={byAccountModel} />}
 
       {/* 上游自己那份统计（issue #59）。**单独一段、口径写明**：它含直连上游的
           调用、且自上游进程启动累计，与上面的时段选择器无关——混着看会得出
           「今日请求包含了直连流量」这种错误结论。取不到时只写原因，不弹提示。 */}
-      <section className="rounded-[20px] bg-muted p-4">
+      {platform === 'wb' && <section className="rounded-[20px] bg-muted p-4">
         <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <div className="flex items-center gap-2 text-sm font-medium">
             <Server className="h-4 w-4" />
@@ -705,7 +706,7 @@ export default function StatsPage() {
             )}
           </>
         ) : null}
-      </section>
+      </section>}
     </div>
   );
 }

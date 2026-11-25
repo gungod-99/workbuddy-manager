@@ -22,7 +22,7 @@
  */
 import {useEffect, useState} from 'react';
 
-import {errText, upstreamsApi} from '@/lib/api';
+import {errText, upstreamsApi, type UpstreamWrite} from '@/lib/api';
 import {useT} from '@/lib/i18n/provider';
 import {notify} from '@/lib/toast';
 import type {UpstreamEndpoint} from '@/lib/types';
@@ -108,6 +108,7 @@ export function UpstreamFormDialog({
 
   const defaultBaseUrl = defaultUpstream?.base_url || '';
   const defaultDir = defaultUpstream?.auth_dir || '';
+  const isCodeArts = editing?.platform === 'ca';
 
   // 打开时按 editing / 默认分组重置。依赖只取字符串（见上面的注释）。
   useEffect(() => {
@@ -120,8 +121,8 @@ export function UpstreamFormDialog({
         note: editing.note || '',
         enabled: editing.enabled,
         // 还没配账号目录的分组：带出建议路径，用户直接保存即可开始用
-        auth_dir: editing.auth_dir || suggestAuthDir(defaultDir, editing.name),
-        container: editing.container || '',
+        auth_dir: editing.platform === 'ca' ? '' : editing.auth_dir || suggestAuthDir(defaultDir, editing.name),
+        container: editing.platform === 'ca' ? '' : editing.container || '',
       });
       setDirTouched(!!editing.auth_dir);
     } else {
@@ -143,7 +144,10 @@ export function UpstreamFormDialog({
       notify.err(t('upstreams.nameUrlRequired'));
       return;
     }
-    const payload = {...form, base_url: baseUrl};
+    const payload: UpstreamWrite = {...form, base_url: baseUrl, platform: editing?.platform || 'wb'};
+    if (isCodeArts) { payload.auth_dir = ''; payload.container = ''; }
+    // 编辑时空值表示保留已有密钥，避免只改名称后清掉 CA 内部网关凭据。
+    if (editing && !payload.api_key?.trim()) delete payload.api_key;
     setBusy(true);
     try {
       const saved = editing
@@ -165,7 +169,7 @@ export function UpstreamFormDialog({
       <DialogContent className="max-w-[440px]" showCloseButton>
         <DialogHeader>
           <DialogTitle>{editing ? t('upstreams.editTitle') : t('upstreams.addTitle')}</DialogTitle>
-          {!simple && <DialogDescription>{t('upstreams.formGroupHint')}</DialogDescription>}
+          {!simple && <DialogDescription>{t(isCodeArts ? 'ca.keyHint' : 'upstreams.formGroupHint')}</DialogDescription>}
         </DialogHeader>
         {/* 布局类（space-y-4 / px-6）必须写在 Body **里面**这层：DialogBody 的
             className 落在 ScrollArea 的 Root 上，写在那儿字段之间会没有间距
@@ -182,7 +186,7 @@ export function UpstreamFormDialog({
                     ...f,
                     name,
                     // 名称变了、目录没被手动改过：建议路径跟着刷新
-                    auth_dir: dirTouched ? f.auth_dir : suggestAuthDir(defaultDir, name),
+                    auth_dir: isCodeArts ? '' : dirTouched ? f.auth_dir : suggestAuthDir(defaultDir, name),
                   }));
                 }}
                 placeholder={t('upstreams.fieldNamePlaceholder')}
@@ -215,7 +219,7 @@ export function UpstreamFormDialog({
                     maxLength={500}
                   />
                 </div>
-                <div className="space-y-1.5">
+                {!isCodeArts && <div className="space-y-1.5">
                   <Label className="text-[11px] text-muted-foreground">{t('upstreams.fieldDir')}</Label>
                   <Input
                     value={form.auth_dir}
@@ -229,8 +233,8 @@ export function UpstreamFormDialog({
                   <p className="text-[11px] leading-4 text-muted-foreground">
                     {t('upstreams.fieldDirHint')}
                   </p>
-                </div>
-                <div className="space-y-1.5">
+                </div>}
+                {!isCodeArts && <div className="space-y-1.5">
                   <Label className="text-[11px] text-muted-foreground">{t('upstreams.fieldContainer')}</Label>
                   <Input
                     value={form.container}
@@ -241,7 +245,7 @@ export function UpstreamFormDialog({
                   <p className="text-[11px] leading-4 text-muted-foreground">
                     {t('upstreams.fieldContainerHint')}
                   </p>
-                </div>
+                </div>}
                 <div className="space-y-1.5">
                   <Label className="text-[11px] text-muted-foreground">{t('upstreams.fieldNote')}</Label>
                   <Textarea

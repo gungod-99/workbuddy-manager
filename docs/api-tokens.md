@@ -140,6 +140,12 @@ CREATE INDEX IF NOT EXISTS idx_tokens_prefix ON api_tokens(prefix);
   即便调用者持有 `admin` scope 的 token——让「能改代码的入口」只对真人开放。
 - 同理，**自动更新开关** `PUT /api/settings/auto-update` 也只对会话开放：打开它
   等于授权面板在无人值守时自行下载安装新版本并重启服务，与一键更新同一风险级别。
+- **CA 账号和领取的写接口同样要求管理员会话**：`POST /api/ca/auth/start`、
+  `POST /api/ca/auth/{account_id}/callback`、`POST /api/ca/auth/{account_id}/cancel`、
+  `PATCH /api/ca/accounts/{account_id}`、`DELETE /api/ca/accounts/{account_id}`、
+  `POST /api/ca/accounts/{account_id}/refresh`、`POST /api/ca/checkin` 和
+  `PATCH /api/ca/auto-checkin`。这些入口处理账号凭据、启停或领取设置，管理员 API
+  Token 也不能调用。CA 账号的安全投影、积分、仪表盘与自动领取状态可由只读身份查询。
 
 ## 与前端 / SDK 的衔接
 

@@ -32,6 +32,8 @@ import {
 } from '@/lib/display-prefs';
 import {accountApi, statsApi, upstreamApi, upstreamsApi} from '@/lib/api';
 import {useRealm} from '@/lib/realm-context';
+import {usePlatform} from '@/lib/platform-context';
+import {CodeArtsDashboard} from '@/components/common/accounts/CodeArtsDashboard';
 import type {
   CreditsFlow,
   CreditsMeta,
@@ -128,7 +130,7 @@ type CreditsResponse = Awaited<ReturnType<typeof accountApi.refreshCredits>>;
  *     同一类坑在统计页已经踩过一次（见 `test_stats_keeps_upstream_out_of_the_main_group`）。
  */
 async function loadPoolSnapshot(): Promise<GroupSlice[]> {
-  const {items} = await upstreamsApi.list();
+  const {items} = await upstreamsApi.list('wb');
   const targets = accountGroups(items ?? []);
   const settled = await Promise.allSettled(
     targets.map(async (g): Promise<GroupSlice> => {
@@ -185,7 +187,7 @@ async function loadPoolSnapshot(): Promise<GroupSlice[]> {
  * 同时打掉账号与积分两块，而它们本来可以各自承担。代价是一次本地读库。
  */
 async function loadGroupCredits(): Promise<CreditsResponse> {
-  const {items} = await upstreamsApi.list();
+  const {items} = await upstreamsApi.list('wb');
   const targets = accountGroups(items ?? []);
   const settled = await Promise.allSettled(
     targets.map((g) => accountApi.refreshCredits(false, g.id ?? null)),
@@ -205,6 +207,11 @@ async function loadGroupCredits(): Promise<CreditsResponse> {
 }
 
 export default function DashboardPage() {
+  const {platform} = usePlatform();
+  return platform === 'ca' ? <CodeArtsDashboard /> : <WorkBuddyDashboard />;
+}
+
+function WorkBuddyDashboard() {
   const {realm, label: realmName} = useRealm();
   const t = useT();
 

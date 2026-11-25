@@ -3,7 +3,7 @@
 import {useMemo, useRef, useState} from 'react';
 import {Check, ChevronsUpDown, Search, X} from 'lucide-react';
 import {accountApi, modelApi} from '@/lib/api';
-import type {CatalogModel} from '@/lib/types';
+import type {CatalogModel, Platform} from '@/lib/types';
 import {isFreeModel} from '@/lib/model-free';
 import type {Realm} from '@/lib/realm-context';
 import {useT} from '@/lib/i18n/provider';
@@ -33,6 +33,7 @@ export function ModelWhitelistInput({
   onEdit,
   onBlur,
   realm,
+  platform = 'wb',
   placeholder,
   disabled = false,
 }: {
@@ -50,6 +51,7 @@ export function ModelWhitelistInput({
   onBlur?: (next: string) => void;
   /** 当前密钥的限定版本：清单里与它一致的那一组排在前面，便于先挑本版模型 */
   realm?: Realm | '';
+  platform?: Platform;
   placeholder?: string;
   disabled?: boolean;
 }) {
@@ -86,6 +88,11 @@ export function ModelWhitelistInput({
   async function ensureCatalog() {
     if (catalog || failed) return;
     try {
+      if (platform === 'ca') {
+        const ca = await modelApi.catalog('cn', false, 'ca');
+        setCatalog({cn: ca.models, global: [], realms: new Set<Realm>(['cn'])});
+        return;
+      }
       // 用模型目录而不是 /api/models：只有目录条目带 tags（含「限时免费」），
       // 白名单的免费筛选依赖它。目录有后端缓存，打开弹窗时拉一次即可。
       const [cn, global, accounts] = await Promise.all([
@@ -110,7 +117,7 @@ export function ModelWhitelistInput({
   const groups: {key: Realm; label: string; models: CatalogModel[]}[] = [];
   if (catalog) {
     const hasAccounts = (r: Realm) => !catalog.realms || catalog.realms.has(r);
-    if (hasAccounts('cn')) groups.push({key: 'cn', label: t('realm.cn'), models: catalog.cn});
+    if (hasAccounts('cn')) groups.push({key: 'cn', label: platform === 'ca' ? t('platform.ca') : t('realm.cn'), models: catalog.cn});
     if (hasAccounts('global')) {
       groups.push({key: 'global', label: t('realm.global'), models: catalog.global});
     }

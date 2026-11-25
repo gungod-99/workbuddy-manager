@@ -1,4 +1,146 @@
 export type Role = 'admin' | 'viewer';
+export type Platform = 'wb' | 'ca';
+
+export interface CodeArtsAccount {
+  id: string;
+  platform: 'ca';
+  nickname: string;
+  enabled: boolean;
+  expires_at: number | null;
+  is_expired: boolean;
+  created_at: number | null;
+  last_used_at: number | null;
+  refreshable: boolean;
+  credential_status: string;
+  model_rate_limits: Record<string, number | null>;
+}
+
+export interface CodeArtsLoginSession {
+  account_id: string;
+  login_url: string;
+  expires_at: number;
+}
+
+export type CodeArtsCheckinKind = 'claimed' | 'already-claimed' | 'inactive' | 'failed';
+
+export interface CodeArtsCreditPackage {
+  name: string;
+  unit: 'credit' | 'token';
+  remaining: number | null;
+  total: number | null;
+  used: number | null;
+  active: boolean;
+  expires_at: number | null;
+  expired_time: string;
+  expiring_remaining: number | null;
+  expiry_note: string;
+}
+
+export interface CodeArtsBalance {
+  total: number;
+  expired_total: number | null;
+  expiring_total: number | null;
+  packages: CodeArtsCreditPackage[];
+}
+
+export interface CodeArtsCreditAccount {
+  account_id: string;
+  nickname: string;
+  balance: CodeArtsBalance | null;
+  error: string;
+  checkin: {kind: CodeArtsCheckinKind; credit: number | null; message: string; covers_today: boolean; at: number} | null;
+}
+
+export interface CodeArtsCredits {
+  platform: 'ca';
+  accounts: CodeArtsCreditAccount[];
+  total: number | null;
+  known_accounts: number;
+  unknown_accounts: number;
+  from_cache: boolean;
+  checked_at: number;
+}
+
+export interface CodeArtsCheckinResult {
+  platform: 'ca';
+  date: string;
+  checked_at: number;
+  results: {account_id: string; nickname: string; kind: CodeArtsCheckinKind; credit: number | null;
+    message: string; action_required: boolean; covers_today: boolean}[];
+  summary: {claimed: number | null; already_claimed: number | null; inactive: number | null;
+    failed: number | null; total_credit: number | null};
+}
+
+export interface CodeArtsAutoCheckin {
+  platform: 'ca';
+  enabled: boolean;
+  times: string[];
+  timezone: string;
+  jitter_minutes: number | null;
+  next_run_at: number | null;
+  running: boolean;
+  last_at: number | null;
+  last_result: string;
+  pending: boolean;
+}
+
+export interface CodeArtsLedgerTotals {
+  requests: number | null;
+  reported_requests: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cache_read_tokens: number | null;
+  cache_write_tokens: number | null;
+  reasoning_tokens: number | null;
+  total_tokens: number | null;
+  errors: number | null;
+}
+
+export interface CodeArtsLedgerAccount {
+  account_id: string | null;
+  totals: CodeArtsLedgerTotals;
+  models: {model: string; totals: CodeArtsLedgerTotals}[];
+}
+
+export interface CodeArtsRequestQuality {
+  requests: number;
+  succeeded: number;
+  failed: number;
+  other: number;
+  failures_4xx: number;
+  failures_5xx: number;
+  rate_limited: number;
+  success_rate: number | null;
+  avg_latency_ms: number | null;
+  latency_samples: number;
+  avg_first_token_ms: number | null;
+  first_token_samples: number;
+  tokens_per_sec: number | null;
+  throughput_samples: number;
+  reported_credit: number | null;
+  credit_samples: number;
+  unreported_credit: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+}
+
+export interface CodeArtsDashboardData {
+  platform: 'ca';
+  days: number;
+  timezone: string;
+  checked_at: number;
+  range: {from: string; to: string};
+  status: {connected: boolean; closed: boolean | null; accounts_total: number | null;
+    accounts_enabled: number | null; models_total: number | null; models_disabled: number | null; error: string};
+  quality: CodeArtsRequestQuality;
+  today: CodeArtsRequestQuality;
+  recent_requests: Pick<RequestLog, 'id' | 'ts' | 'status' | 'model' | 'mapped_model' | 'key_name' |
+    'prompt_tokens' | 'completion_tokens' | 'latency_ms' | 'first_token_ms' | 'credit' | 'error'>[];
+  ledger: {source: 'codearts_official_gateway'; retention_days: number;
+    history: {day: string; totals: CodeArtsLedgerTotals; accounts: CodeArtsLedgerAccount[]}[] | null};
+  log_retention_days: number;
+  errors: {status?: string; ledger?: string};
+}
 
 export interface Me {
   username: string;
@@ -348,6 +490,7 @@ export interface ModelListResponse {
 
 /** 模型目录里的一条：比 /v1/models 多显示名与推理档位 */
 export interface CatalogModel {
+  platform?: Platform;
   id: string;
   /** 显示名，来自腾讯模型接口；上游回退数据为空串 */
   name: string;
@@ -408,9 +551,10 @@ export interface CatalogSummary {
  * - `upstream`：回退到上游 /v1/models，字段有限
  * - `none`：两者都拿不到
  */
-export type CatalogSourceKind = 'tencent' | 'upstream' | 'none';
+export type CatalogSourceKind = 'tencent' | 'upstream' | 'none' | 'codearts';
 
 export interface ModelCatalog {
+  platform?: Platform;
   models: CatalogModel[];
   source: CatalogSourceKind;
   /** 来源的中文说明，直接用于界面标注 */
@@ -433,6 +577,7 @@ export interface ModelCatalog {
  * 不是数据库记录，所以它没有 id、也不可改不可删。
  */
 export interface UpstreamEndpoint {
+  platform?: Platform;
   id: number | null;
   name: string;
   base_url: string;
@@ -462,6 +607,7 @@ export interface UpstreamEndpoint {
 }
 
 export interface ApiKey {
+  platform?: Platform;
   id: number;
   name: string;
   prefix: string;
@@ -524,7 +670,7 @@ export interface KeyExportResult {
   client: 'ccswitch' | 'zcode';
   /** 面板对外地址 + /v1，客户端实际要填的 base URL */
   base_url: string;
-  realm: 'cn' | 'global';
+  realm: 'cn' | 'global' | 'ca';
   /** **网关口径**的模型 id（带 cn: / global: 前缀） */
   models: string[];
   name: string;
@@ -657,6 +803,8 @@ export interface RequestLog {
   ip: string;
   model: string | null;
   mapped_model: string | null;
+  realm: 'cn' | 'global' | 'ca';
+  platform: Platform;
   /**
    * 思考强度（reasoning_effort）：客户端在请求体里**显式传的**档位
    * （low / medium / high / max…，不同模型档位不同）。

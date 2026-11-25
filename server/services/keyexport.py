@@ -47,6 +47,10 @@ def gateway_model_id(model: str, realm: str = 'cn') -> str:
     name = str(model or '').strip()
     if not name:
         raise ValueError('模型名不能为空')
+    if name.startswith('codearts/'):
+        return name
+    if str(realm).lower() == 'ca':
+        raise ValueError('CA 模型名必须包含 codearts/ 前缀')
     if name.startswith('cn:') or name.startswith('global:'):
         return name
     prefix = REALM_PREFIX.get(str(realm or 'cn').strip().lower(), REALM_PREFIX['cn'])

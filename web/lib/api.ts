@@ -2,6 +2,7 @@ import axios, {AxiosError} from 'axios';
 import {BASE_PATH} from './base-path';
 import {t, tp} from './i18n';
 import type {Realm} from './realm-context';
+import type {UsageRealm} from './platform-context';
 import type {
   Account,
   AccountsResponse,
@@ -518,18 +519,39 @@ export const upstreamApi = {
   models: (realm?: Realm) => get<ModelListResponse>('/api/models', {realm}),
 };
 
+export const codeartsApi = {
+  dashboard: (days = 14) => get<import('./types').CodeArtsDashboardData>('/api/ca/dashboard', {days}),
+  list: () => get<{platform: 'ca'; accounts: import('./types').CodeArtsAccount[]}>('/api/ca/accounts'),
+  start: () => post<import('./types').CodeArtsLoginSession>('/api/ca/auth/start'),
+  poll: (accountId: string) => get<{done: boolean; success: boolean; error?: string}>(
+    `/api/ca/auth/${encodeURIComponent(accountId)}/poll`),
+  callback: (accountId: string, callbackUrl: string) => post<{accepted: boolean}>(
+    `/api/ca/auth/${encodeURIComponent(accountId)}/callback`, {callback_url: callbackUrl}),
+  cancel: (accountId: string) => post<{ok: boolean; preserved: boolean}>(
+    `/api/ca/auth/${encodeURIComponent(accountId)}/cancel`),
+  credits: async (force = false) => (await http.get<import('./types').CodeArtsCredits>('/api/ca/credits', {params: {force}, timeout: 100000})).data,
+  checkin: async () => (await http.post<import('./types').CodeArtsCheckinResult>('/api/ca/checkin', undefined, {timeout: 135000})).data,
+  autoCheckin: () => get<import('./types').CodeArtsAutoCheckin>('/api/ca/auto-checkin'),
+  saveAutoCheckin: (body: {enabled?: boolean; times?: string[]; jitter_minutes?: number}) =>
+    patch<import('./types').CodeArtsAutoCheckin>('/api/ca/auto-checkin', body),
+  update: (accountId: string, body: {enabled?: boolean; nickname?: string}) => patch<{ok: boolean}>(
+    `/api/ca/accounts/${encodeURIComponent(accountId)}`, body),
+  remove: (accountId: string) => del<{ok: boolean}>(`/api/ca/accounts/${encodeURIComponent(accountId)}`),
+  refresh: (accountId: string) => post<{ok: boolean}>(`/api/ca/accounts/${encodeURIComponent(accountId)}/refresh`),
+};
+
 /* ── 模型中心 ───────────────────────────────────────── */
 export const modelApi = {
   /** 指定版本的模型目录；force=true 绕过 5 分钟缓存 */
-  catalog: (realm: Realm = 'cn', force = false) =>
-    get<ModelCatalog>('/api/model-catalog', {realm, force}),
+  catalog: (realm: Realm = 'cn', force = false, platform: import('./types').Platform = 'wb') =>
+    get<ModelCatalog>('/api/model-catalog', {realm, force, platform}),
 };
 
 /* ── 聊天测试台 ─────────────────────────────────────── */
 export const playgroundApi = {
   /** 指定版本的可选模型 + 各自支持的推理档位（与模型中心同源） */
-  models: (realm: Realm = 'cn') =>
-    get<PlaygroundModels>('/api/playground/models', {realm}),
+  models: (realm: Realm = 'cn', platform: import('./types').Platform = 'wb') =>
+    get<PlaygroundModels>('/api/playground/models', {realm, platform}),
 };
 
 /* ── API 密钥 ───────────────────────────────────────── */
@@ -540,6 +562,7 @@ export const playgroundApi = {
  * 注意 `UpstreamWrite` 与 `UpstreamEndpoint` 是**两套形状**：`api_key` 只在请求里
  * 出现（响应只回脱敏值与 has_key，见 routers/upstreams.py 的 _serialize）。 */
 export type UpstreamWrite = {
+  platform?: import('./types').Platform;
   name: string;
   base_url: string;
   api_key?: string;
@@ -555,7 +578,7 @@ export type UpstreamWrite = {
 };
 
 export const upstreamsApi = {
-  list: () => get<{items: UpstreamEndpoint[]}>('/api/upstreams'),
+  list: (platform?: import('./types').Platform) => get<{items: UpstreamEndpoint[]}>('/api/upstreams', {platform}),
   create: (body: UpstreamWrite) => post<UpstreamEndpoint>('/api/upstreams', body),
   update: (id: number, body: Partial<UpstreamWrite>) =>
     patch<UpstreamEndpoint>(`/api/upstreams/${id}`, body),
@@ -565,7 +588,7 @@ export const upstreamsApi = {
 };
 
 export const keyApi = {
-  list: () => get<ApiKey[]>('/api/keys'),
+  list: (platform?: import('./types').Platform) => get<ApiKey[]>('/api/keys', {platform}),
   create: (body: Partial<ApiKey>) => post<ApiKey>('/api/keys', body),
   update: (id: number, body: Partial<ApiKey>) => patch<ApiKey>(`/api/keys/${id}`, body),
   remove: (id: number) => del<{ok: boolean}>(`/api/keys/${id}`),
@@ -586,9 +609,9 @@ export const keyApi = {
    * `checked: false` 表示拿不到模型清单（缓存未就绪），此时**不能**把空
    * `unknown` 当成「全部正确」展示。
    */
-  checkModels: (models: string[], realm: string) =>
+  checkModels: (models: string[], realm: string, platform: import('./types').Platform = 'wb') =>
     post<{checked: boolean; unknown: string[]; reason?: string}>(
-      '/api/keys/check-models', {models, realm}),
+      '/api/keys/check-models', {models, realm, platform}),
   /**
    * 把一把**刚创建**的密钥导出为客户端配置片段（cc-switch / ZCode）。
    *
@@ -748,28 +771,28 @@ export interface StatsRange {
 
 export const statsApi = {
   /** realm 非空时只统计该版本（界面按版本切换时传） */
-  summary: (realm?: Realm) => get<StatsSummary>('/api/stats/summary', {realm}),
-  daily: (days = 30, realm?: Realm, range?: StatsRange) =>
+  summary: (realm?: UsageRealm) => get<StatsSummary>('/api/stats/summary', {realm}),
+  daily: (days = 30, realm?: UsageRealm, range?: StatsRange) =>
     get<UsagePoint[]>('/api/stats/daily', {days, realm, ...range}),
   /**
    * 某天**按小时**的用量（默认今天）。「今日」趋势图用它 —— 范围只有一天时
    * 按天聚合只有一根柱子。后端固定返回 24 个桶（补零），前端不必再补。
    */
-  hourly: (day?: string, realm?: Realm) =>
+  hourly: (day?: string, realm?: UsageRealm) =>
     get<UsageHourPoint[]>('/api/stats/hourly', {day, realm}),
 
   /** 积分收支（收入 / 支出）按天聚合 + 今日 / 近 7 天合计 */
-  creditsFlow: (days = 30, realm?: Realm, range?: StatsRange) =>
+  creditsFlow: (days = 30, realm?: UsageRealm, range?: StatsRange) =>
     get<CreditsFlow>('/api/stats/credits', {days, realm, ...range}),
-  byModel: (days = 30, realm?: Realm, range?: StatsRange) =>
+  byModel: (days = 30, realm?: UsageRealm, range?: StatsRange) =>
     get<UsageBreakdown[]>('/api/stats/by-model', {days, realm, ...range}),
-  byKey: (days = 30, realm?: Realm, range?: StatsRange) =>
+  byKey: (days = 30, realm?: UsageRealm, range?: StatsRange) =>
     get<UsageBreakdown[]>('/api/stats/by-key', {days, realm, ...range}),
   /** 按「日期 × 账号」聚合（issue #402）；同一范围解析规则 */
-  byAccount: (days = 30, realm?: Realm, range?: StatsRange) =>
+  byAccount: (days = 30, realm?: UsageRealm, range?: StatsRange) =>
     get<AccountUsageResponse>('/api/stats/by-account', {days, realm, ...range}),
   /** 按「账号 × 模型」聚合（issue #369） */
-  byAccountModel: (days = 30, realm?: Realm, range?: StatsRange) =>
+  byAccountModel: (days = 30, realm?: UsageRealm, range?: StatsRange) =>
     get<AccountModelUsageResponse>('/api/stats/by-account-model', {days, realm, ...range}),
   /**
    * 上游自己那份统计（issue #59）。口径与本页其它数字不同：含**直连上游**的调用，
@@ -790,7 +813,8 @@ export const statsApi = {
    * （来自上游 /status），`rpm_*`/`peaks`/`series` 来自本库、只含已完成请求。所以
    * 它们的刷新节奏也不同（界面每 1 秒拉一次），也不跟 `range` 自定义区间走。
    */
-  realtime: (days = 1) => get<StatsRealtime>('/api/stats/realtime', {days}),
+  realtime: (days = 1, platform: import('./types').Platform = 'wb') =>
+    get<StatsRealtime>('/api/stats/realtime', {days, platform}),
 };
 
 /* ── 安全 / IP ──────────────────────────────────────── */

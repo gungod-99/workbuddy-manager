@@ -28,6 +28,7 @@ import {fmtCredit} from '@/lib/format';
 import {cn} from '@/lib/utils';
 import {useAuth} from '@/lib/auth-context';
 import {useRealm} from '@/lib/realm-context';
+import {usePlatform} from '@/lib/platform-context';
 
 /**
  * 模型列表的占位。
@@ -52,7 +53,9 @@ interface Msg {
 export default function PlaygroundPage() {
   const t = useT();
   const {isAdmin} = useAuth();
-  const {realm, label: realmName} = useRealm();
+  const {realm, label} = useRealm();
+  const {platform} = usePlatform();
+  const realmName = platform === 'ca' ? t('platform.ca') : label;
   /**
    * 模型列表。走统一的取数状态：首屏还没拿到之前显示骨架，而不是先写一句
    * 「暂无可用模型」——那句话在数据还在路上时是错的，用户会以为这个版本没模型。
@@ -67,8 +70,8 @@ export default function PlaygroundPage() {
     isRefreshing,
     reload: reloadModels,
   } = useAsyncAll(
-    {models: async () => (await playgroundApi.models(realm)).models || []},
-    [realm],
+    {models: async () => (await playgroundApi.models(realm, platform)).models || []},
+    [realm, platform],
   );
   const models: ChatModelOption[] = values.models ?? NO_MODELS;
 
@@ -96,7 +99,7 @@ export default function PlaygroundPage() {
   useEffect(() => {
     setMsgs([]);
     setSessionCredit(0);
-  }, [realm]);
+  }, [realm, platform]);
 
   // 自动滚到底部，但用户主动向上翻看时不要抢滚动位置
   useEffect(() => {
@@ -134,6 +137,7 @@ export default function PlaygroundPage() {
         body: JSON.stringify({
           model,
           realm,
+          platform,
           reasoning_effort: effort,
           stream: true,
           messages: nextMsgs.map((m) => ({role: m.role, content: m.content})),
@@ -232,7 +236,7 @@ export default function PlaygroundPage() {
       setStreaming(false);
       abortRef.current = null;
     }
-  }, [input, msgs, model, effort, realm, streaming]);
+  }, [input, msgs, model, effort, realm, platform, streaming]);
 
   const stop = () => abortRef.current?.abort();
 

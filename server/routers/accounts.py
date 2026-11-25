@@ -22,6 +22,7 @@ from ..services import (
 )
 from ..services.realm import realm_of, supports_checkin
 from ..services import taskpacing
+from ..services import platforms
 
 logger = logging.getLogger('workbuddy.accounts')
 
@@ -343,6 +344,7 @@ def _relogin_target(uid: str, group: dict) -> dict | None:
             'nickname': str(acct.get('nickname') or ''),
             'realm': realm_of({'realm': raw.get('realm') or auth.get('realm'),
                                'domain': auth.get('domain')}),
+            'proxy': str(raw.get('proxy') or '').strip(),
             'panel_disabled': path.name.endswith('.disabled'),
         }
     return None
@@ -421,6 +423,8 @@ def _group(upstream_id: int | None) -> dict:
     row = upstreamsvc.get_upstream(upstream_id)
     if row is None:
         raise HTTPException(status_code=404, detail='分组不存在（可能已被删除）')
+    if platforms.upstream_platform(row) != 'wb':
+        raise HTTPException(status_code=400, detail='CA 账号请在 CA 平台管理，不能使用 WB 账号接口')
     return row
 
 
@@ -775,7 +779,7 @@ async def auth_start(
         raw_region = str(body.get('region'))
     reg = str(raw_region or '').strip() or None
     try:
-        proxy_name = config.DEFAULT_ACCOUNT_PROXY
+        proxy_name = target['proxy'] if target is not None else config.DEFAULT_ACCOUNT_PROXY
         if isinstance(body, dict) and 'proxy' in body:
             if not isinstance(body['proxy'], str):
                 raise HTTPException(status_code=400, detail='proxy 必须是线路名或空字符串')

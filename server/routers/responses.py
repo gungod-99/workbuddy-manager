@@ -1867,6 +1867,14 @@ async def _handle(request: Request) -> JSONResponse | StreamingResponse:
         latency = int((time.time() - started) * 1000)
         gateway._record(key, ip, model, mapped or '', resp.status_code, 0, 0, latency,
                         ua, text, True)
+        # Diagnostic capture must also include failures before the SSE stream starts.
+        tap_svc.capture(
+            body=client_body, headers=request.headers.items(), key=key, ua=ua,
+            path=request.url.path, protocol='responses', status=resp.status_code,
+            latency_ms=latency, stream=True,
+            text=raw.decode('utf-8', errors='replace'), error=text,
+            upstream_body=payload, upstream_headers=up_headers, trace_id=trace_id,
+        )
         return _failed(_upstream_error_text(parsed, None, fallback=text),
                        resp.status_code, hint=gateway._error_hint(parsed))
 

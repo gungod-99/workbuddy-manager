@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .. import config, db, keysvc, security, upstreamsvc
-from ..services import keyexport, keyimport, modelcatalog, modelmap
+from ..services import keyexport, keyimport, modelcatalog, modelmap, codearts, platforms
 from ..iputil import client_ip
 
 router = APIRouter(prefix='/api/keys', tags=['keys'])
@@ -86,6 +86,7 @@ def _check_custom_token_allowed(token: str) -> None:
 
 
 class KeyIn(BaseModel):
+    platform: str = Field(default='wb', max_length=8)
     name: str = Field(min_length=1, max_length=64)
     # 绑定的上游（多上游 / 分组隔离）：null / 0 / 省略 = 默认上游。
     # 类型是 int 而不是 str：界面上是下拉选 id，存成整数才能在外键式查询里用。
@@ -109,6 +110,7 @@ class KeyIn(BaseModel):
 
 
 class KeyPatch(BaseModel):
+    platform: str | None = None
     name: str | None = None
     # 显式传 null 是**允许**的：把密钥改回默认上游（与 realm 同口径）。
     upstream_id: int | None = None
@@ -124,6 +126,7 @@ class KeyPatch(BaseModel):
 
 
 class WhitelistCheckIn(BaseModel):
+    platform: str = Field(default='wb', max_length=8)
     models: list[str] = Field(default_factory=list)
     realm: str = Field(default='', max_length=16)
 
@@ -150,6 +153,16 @@ def check_models(body: WhitelistCheckIn,
     names = [str(x).strip() for x in body.models if str(x).strip()]
     if not names:
         return {'checked': True, 'unknown': []}
+    try:
+        selected = platforms.normalize(body.platform)
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
+    if selected == 'ca':
+        known = codearts.cached_ids()
+        if known is None or not known:
+            return {'checked': False, 'unknown': [],
+                    'reason': '请先添加华为云账号，并到 CA 模型页刷新目录'}
+        return {'checked': True, 'unknown': [m for m in names if m not in known]}
 
     # 两个版本的清单**分别取、分别判**（见 docstring 里的假警报说明）
     known_by_realm: dict[str, set[str] | None] = {
@@ -166,8 +179,16 @@ def check_models(body: WhitelistCheckIn,
 
 
 @router.get('')
-def list_keys(user: dict = Depends(security.current_user)) -> list[dict]:
-    return keysvc.list_keys()
+def list_keys(platform: str | None = None,
+              user: dict = Depends(security.current_user)) -> list[dict]:
+    items = keysvc.list_keys()
+    if platform is None:
+        return items
+    try:
+        selected = platforms.normalize(platform)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return [item for item in items if platforms.key_platform(item) == selected]
 
 
 @router.post('')
@@ -175,10 +196,15 @@ def create_key(body: KeyIn, request: Request,
                user: dict = Depends(security.require_admin)) -> dict:
     _check_name(body.name)
     _check_ip_allowlist(body.ip_allowlist)
-    _check_upstream(body.upstream_id)
     if body.custom_token:
         _check_custom_token_allowed(body.custom_token)
     try:
+        selected = platforms.normalize(body.platform)
+        uid = platforms.key_upstream(selected, body.upstream_id)
+        for model in body.models:
+            error = platforms.check_model({'platform': selected}, model, model)
+            if error:
+                raise ValueError(error)
         created = keysvc.create_key(
             name=body.name,
             expires_at=body.expires_at,
@@ -189,7 +215,8 @@ def create_key(body: KeyIn, request: Request,
             realm=body.realm,
             quota_credit=body.quota_credit,
             daily_quota=body.daily_quota,
-            upstream_id=body.upstream_id,
+            upstream_id=uid,
+            platform=selected,
             custom_token=body.custom_token,
         )
     except keysvc.TokenConflict as exc:
@@ -212,13 +239,30 @@ def create_key(body: KeyIn, request: Request,
 def update_key(key_id: int, body: KeyPatch, user: dict = Depends(security.require_admin)) -> dict:
     # 只校验本次真的提交了的字段（PATCH 是部分更新，`exclude_unset` 语义）
     patch = body.model_dump(exclude_unset=True)
+    current = keysvc.get_key(key_id)
+    if not current:
+        raise HTTPException(status_code=404, detail='密钥不存在')
     if 'name' in patch:
         _check_name(patch['name'])
     if 'ip_allowlist' in patch:
         _check_ip_allowlist(patch['ip_allowlist'])
-    if 'upstream_id' in patch:
-        _check_upstream(patch['upstream_id'])
-    updated = keysvc.update_key(key_id, patch)
+    try:
+        selected = platforms.normalize(patch.get('platform', current.get('platform')))
+        changed = selected != platforms.key_platform(current)
+        if 'platform' in patch or 'upstream_id' in patch:
+            patch['upstream_id'] = platforms.key_upstream(selected, patch.get('upstream_id', None if changed else current.get('upstream_id')))
+        if changed and 'models' not in patch:
+            patch['models'] = []
+        if selected == 'ca':
+            patch['realm'] = ''
+        if 'models' in patch:
+            for model in patch['models'] or []:
+                error = platforms.check_model({'platform': selected}, model, model)
+                if error:
+                    raise ValueError(error)
+        updated = keysvc.update_key(key_id, patch)
+    except ValueError as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
     if not updated:
         raise HTTPException(status_code=404, detail='密钥不存在')
     return updated
@@ -384,6 +428,20 @@ def _config_context(body: ExportIn, request: Request) -> dict:
     的模块说明）在复制粘贴中最容易走样，只留一份就不存在走样。
     """
     resolved = keysvc.resolve(body.token)
+    if resolved and platforms.key_platform(resolved) == 'ca':
+        models = body.models or resolved.get('models') or sorted(codearts.cached_ids() or codearts.fetch_ids_blocking())
+        if not models:
+            raise HTTPException(409, detail='请先添加并启用华为云账号，刷新 CA 模型目录后再导出')
+        for model in [*models, *([body.default_model] if body.default_model else [])]:
+            if platforms.check_model(resolved, model, model):
+                raise HTTPException(400, detail='CA 配置只能包含 codearts/ 前缀的模型')
+            if not keysvc.model_allowed(resolved, model):
+                raise HTTPException(400, detail='导出的 CA 模型不在该密钥的模型白名单内')
+        return {'resolved': resolved, 'realm': 'ca',
+                'base_url': keyexport.gateway_base_url(_derive_base_url(request, body.base_url)),
+                'name': body.provider_name.strip() or f"CodeArts {resolved.get('name') or 'key'}",
+                'models': models, 'default_model': body.default_model.strip() or None,
+                'prefix': resolved.get('prefix') or 'ca'}
     realm = str((resolved or {}).get('realm') or '').strip() or 'cn'
     if realm not in ('cn', 'global'):
         realm = 'cn'

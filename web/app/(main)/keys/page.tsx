@@ -7,7 +7,7 @@ import {useAsyncAll} from '@/lib/use-async-data';
 import {notify} from '@/lib/toast';
 import {keyApi, upstreamsApi, errText} from '@/lib/api';
 import {BASE_PATH} from '@/lib/base-path';
-import type {ApiKey, KeyImportResult, KeyImportStatus, UpstreamEndpoint} from '@/lib/types';
+import type {ApiKey, KeyImportResult, KeyImportStatus, UpstreamEndpoint, Platform} from '@/lib/types';
 import {copyText, fmtDateTime, fmtNumber} from '@/lib/format';
 import {PageHeader} from '@/components/common/layout/PageHeader';
 import {PageSectionTabs} from '@/components/common/layout/PageSectionTabs';
@@ -18,6 +18,7 @@ import {LoadError} from '@/components/common/states/LoadError';
 import {SkeletonBar} from '@/components/common/states/SkeletonBar';
 import {useAuth} from '@/lib/auth-context';
 import {useRealm, type Realm} from '@/lib/realm-context';
+import {usePlatform} from '@/lib/platform-context';
 import {Button} from '@/components/ui/button';
 import {CopyButton} from '@/components/ui/copy-button';
 import {RichText} from '@/lib/i18n/rich-text';
@@ -54,6 +55,7 @@ import {
 } from '@/components/ui/table';
 
 interface FormState {
+  platform: Platform;
   name: string;
   /** 新建：0 = 永不过期；编辑：0 = 保持当前有效期不变 */
   expiresDays: string;
@@ -81,6 +83,7 @@ interface FormState {
 }
 
 const emptyForm: FormState = {
+  platform: 'wb',
   name: '',
   expiryMode: 'keep',
   expiresDays: '0',
@@ -113,6 +116,7 @@ export default function KeysPage() {
   const t = useT();
   const {isAdmin} = useAuth();
   const {realm} = useRealm();
+  const {platform} = usePlatform();
   /**
    * 密钥列表 + 上游列表。**两份数据放同一个 hook，不拆。**
    *
@@ -241,7 +245,7 @@ export default function KeysPage() {
   function openCreate() {
     setEditing(null);
     // 新建时默认跟随当前所在版本：在哪个版本的界面里建，就是哪个版本的密钥
-    setForm({...emptyForm, realm});
+    setForm({...emptyForm, platform, realm: platform === 'ca' ? '' : realm});
     setUnknownModels(null);
     setFormOpen(true);
   }
@@ -249,6 +253,7 @@ export default function KeysPage() {
   function openEdit(k: ApiKey) {
     setEditing(k);
     setForm({
+      platform: k.platform || 'wb',
       name: k.name,
       // 默认不改动有效期；要续期/取消过期需显式选择
       expiryMode: 'keep',
@@ -296,7 +301,8 @@ export default function KeysPage() {
         // 会与界面上显示的不一致——那种错是静默的，只有调用时才暴露。
         // 例外是用户在新建弹窗里显式打开了「不限制」（form.realm === ''，
         // issue #191）：那是明确的意图，不能被页面版本覆盖掉。
-        realm: editing || form.realm === '' ? form.realm : realm,
+        platform: form.platform,
+        realm: form.platform === 'ca' ? '' : editing || form.realm === '' ? form.realm : realm,
         // 绑定上游（多上游 / 分组隔离）：null = 默认上游，照传——
         // 后端以它区分「显式改回默认上游」与「本次没提交该字段」（PATCH 语义）。
         upstream_id: form.upstream_id,
@@ -555,8 +561,9 @@ export default function KeysPage() {
 
   // 分组过滤。keys 的量级是「几十到几百」，一次渲染算两遍不值得上 useMemo
   // （那要多写一层依赖数组，还更容易漏依赖）。
-  const normalKeys = keys.filter((k) => !k.packet_id);
-  const packetKeys = keys.filter((k) => k.packet_id);
+  const platformKeys = keys.filter((k) => (k.platform || 'wb') === platform);
+  const normalKeys = platformKeys.filter((k) => !k.packet_id);
+  const packetKeys = platformKeys.filter((k) => k.packet_id);
   const shownKeys = tab === 'packet' ? packetKeys : normalKeys;
 
   const header = (
@@ -662,7 +669,7 @@ export default function KeysPage() {
               return (
                 <TableRow key={k.id} className="border-b border-border/40">
                   <TableCell className="pl-4 text-sm font-medium">
-                    <div>{k.name}</div>
+                    <div>{k.name} <Badge variant="outline" className="ml-1 rounded-full text-[10px]">{(k.platform || 'wb').toUpperCase()}</Badge></div>
                     {/* 只标「绑定了上游」的行：默认上游是绝大多数，每行都标等于没标，
                         有值才说明这把钥匙走的是另一个账号池（见 server/upstreamsvc.py） */}
                     {k.upstream_id ? (
@@ -689,7 +696,7 @@ export default function KeysPage() {
                       单元格与表头顺序反了，界面上「版本」列显示的是有效期、「有效期」
                       列显示的是版本 —— 用户看到的就是这个错位）。 */}
                   <TableCell>
-                    {k.realm === 'global' ? (
+                    {k.platform === 'ca' ? <Badge variant="secondary" className="rounded-full text-[10px]">{t('platform.ca')}</Badge> : k.realm === 'global' ? (
                       <Badge variant="secondary" className="rounded-full text-[10px]">{t('realm.global')}</Badge>
                     ) : k.realm === 'cn' ? (
                       <Badge variant="secondary" className="rounded-full text-[10px]">{t('realm.cn')}</Badge>
@@ -990,6 +997,22 @@ export default function KeysPage() {
                 />
               </div>
               <div className="space-y-1.5">
+                <Label className="text-[11px] text-muted-foreground">{t('platform.select')}</Label>
+                <Select value={form.platform} onValueChange={(value) => {
+                  const next = value as Platform;
+                  setForm({...form, platform: next, realm: next === 'ca' ? '' : realm,
+                    upstream_id: null, models: ''});
+                  setUnknownModels(null);
+                }}>
+                  <SelectTrigger aria-label={t('platform.select')}><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="wb">{t('platform.wb')}</SelectItem>
+                    <SelectItem value="ca">{t('platform.ca')}</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] leading-5 text-muted-foreground">{t(form.platform === 'ca' ? 'ca.keyHint' : 'platform.wbKeyHint')}</p>
+              </div>
+              {form.platform === 'wb' && <div className="space-y-1.5">
                 <Label className="text-[11px] text-muted-foreground">{t('keys.realmLimit')}</Label>
                 {/* 版本归属：**新建时不显示选择器**，直接跟随当前所在版本——
                     在哪个版本的界面里建，就是哪个版本的密钥。
@@ -1061,7 +1084,7 @@ export default function KeysPage() {
                     </label>
                   </>
                 )}
-              </div>
+              </div>}
               <div className="space-y-1.5">
                 <Label className="text-[11px] text-muted-foreground">{t('keys.upstreamLabel')}</Label>
                 {/* 多上游（分组隔离）：选了某个上游，这把密钥的请求就只走那个上游的
@@ -1076,9 +1099,9 @@ export default function KeysPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__default__">{t('keys.upstreamDefault')}</SelectItem>
+                    <SelectItem value="__default__">{t(form.platform === 'ca' ? 'ca.upstreamDefault' : 'keys.upstreamDefault')}</SelectItem>
                     {upstreams
-                      .filter((u) => !u.is_default && u.id != null)
+                      .filter((u) => !u.is_default && u.id != null && (u.platform || 'wb') === form.platform)
                       .map((u) => (
                         <SelectItem key={u.id} value={String(u.id)}>
                           {u.enabled ? u.name : `${u.name}${t('keys.upstreamDisabledSuffix')}`}
@@ -1087,7 +1110,7 @@ export default function KeysPage() {
                   </SelectContent>
                 </Select>
                 <p className="text-[11px] leading-4 text-muted-foreground">
-                  {t('keys.upstreamHint')}
+                  {t(form.platform === 'ca' ? 'ca.keyHint' : 'keys.upstreamHint')}
                 </p>
               </div>
               {/* 密钥形态（issue #447）：只在新建时出现 —— 创建后换 token 等于换
@@ -1114,9 +1137,11 @@ export default function KeysPage() {
                 {/* 手输保留（清单里暂时没有的模型仍要能填），旁边给「从清单选择」：
                     候选按版本分组，勾选即加入 —— 记不住名字、写错了等调用失败才发现的日子结束。 */}
                 <ModelWhitelistInput
+                  key={form.platform}
+                  platform={form.platform}
                   value={form.models}
                   realm={form.realm}
-                  placeholder="glm-5.2, global:gpt-5.4"
+                  placeholder={form.platform === 'ca' ? 'codearts/…' : 'glm-5.2, global:gpt-5.4'}
                   onChange={(next) => {
                     setForm({...form, models: next});
                     // 改了内容就作废上次结论，避免显示过期的「都对」
@@ -1135,7 +1160,7 @@ export default function KeysPage() {
                       return;
                     }
                     try {
-                      const r = await keyApi.checkModels(names, form.realm || '');
+                      const r = await keyApi.checkModels(names, form.realm || '', form.platform);
                       setUnknownModels(r.checked ? r.unknown : null);
                     } catch {
                       setUnknownModels(null);   // 查不了就不显示，不编造

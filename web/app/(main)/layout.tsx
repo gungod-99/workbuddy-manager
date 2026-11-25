@@ -6,7 +6,8 @@ import {ManagementBar} from '@/components/common/layout/ManagementBar';
 import {CommandPalette} from '@/components/common/layout/CommandPalette';
 import {WhatsNewDialog} from '@/components/common/layout/WhatsNewDialog';
 import {LanguageToggle} from '@/components/common/layout/LanguageToggle';
-import {RealmToggle} from '@/components/common/layout/RealmToggle';
+import {PlatformToggle} from '@/components/common/layout/PlatformToggle';
+import {PlatformProvider} from '@/lib/platform-context';
 import {RealmProvider} from '@/lib/realm-context';
 import {useAuth} from '@/lib/auth-context';
 
@@ -26,7 +27,7 @@ export default function MainLayout({
   }, [loading, me, router]);
 
   return (
-    <RealmProvider>
+    <PlatformProvider><RealmProvider>
       <div className="min-h-screen flex flex-col">
         <MemoizedManagementBar />
         <div className="flex flex-1 flex-col">
@@ -44,7 +45,7 @@ export default function MainLayout({
                 <div className="flex flex-wrap items-center justify-end gap-2">
                   <CommandPalette />
                   <LanguageToggle />
-                  <RealmToggle />
+                  <PlatformToggle />
                 </div>
                 {children}
               </div>
@@ -54,6 +55,6 @@ export default function MainLayout({
       </div>
       {/* 升级后的「本次更新」公告：每个版本只弹一次（按 localStorage 记录的版本号）。 */}
       <WhatsNewDialog />
-    </RealmProvider>
+    </RealmProvider></PlatformProvider>
   );
 }
