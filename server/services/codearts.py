@@ -113,10 +113,19 @@ def _prune_pending() -> None:
 
 
 async def accounts() -> list[dict]:
+    from . import codearts_groups
     _prune_pending()
+    snapshot = codearts_groups.memberships()
     value = await rpc('account.list', {'provider': 'codearts'})
-    rows = (value or {}).get('accounts') or []
-    return [_account(a) for a in rows if isinstance(a, dict) and a.get('provider') == 'codearts'
+    rows = (value or {}).get('accounts')
+    if not isinstance(rows, list):
+        raise CodeArtsError('CA 账号列表格式异常，请检查官方服务版本')
+    present = {str(a['id']) for a in rows if isinstance(a, dict)
+               and a.get('provider') == 'codearts' and a.get('id')}
+    codearts_groups.prune_missing(snapshot, present | set(_pending))
+    groups = codearts_groups.memberships()
+    return [{**_account(a), 'group_id': groups.get(str(a.get('id')))}
+            for a in rows if isinstance(a, dict) and a.get('provider') == 'codearts'
             and not (_pending.get(str(a.get('id')), {}).get('cancelled')
                      and a.get('source') not in ('file', 'env', 'runtime', 'memory'))]
 
@@ -131,7 +140,10 @@ async def require_account(account_id: str, *, allow_pending: bool = False) -> No
         raise CodeArtsError('CA 账号不存在或登录已经结束', 404)
 
 
-async def start_login() -> dict:
+async def start_login(group_id: int | None = None) -> dict:
+    from . import codearts_groups
+    if group_id is not None:
+        codearts_groups.require_group(group_id)
     _prune_pending()
     # Supported official preference; headless server never tries to open a browser.
     await rpc('loginPreferences.setEnabled', {'enabled': False})
@@ -147,6 +159,12 @@ async def start_login() -> dict:
     expires_at = int(started_at + LOGIN_SECONDS)
     _pending[aid] = {'expires_at': expires_at, 'cancelled': False,
                      'submitted': False, 'lock': asyncio.Lock()}
+    if group_id is not None:
+        try:
+            codearts_groups.assign([aid], group_id)
+        except ValueError as exc:
+            await cancel_login(aid)
+            raise CodeArtsError(str(exc), 409) from exc
     invalidate_catalog()
     return {'account_id': aid, 'login_url': login_url, 'expires_at': expires_at}
 
@@ -229,6 +247,8 @@ async def update_account(account_id: str, patch: dict) -> dict:
 async def delete_account(account_id: str) -> dict:
     await require_account(account_id)
     await rpc('account.delete', {'accountId': account_id})
+    from . import codearts_groups
+    codearts_groups.assign([account_id], None)
     _pending.pop(account_id, None)
     invalidate_catalog()
     return {'ok': True}

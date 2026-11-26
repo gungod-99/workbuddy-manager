@@ -16,7 +16,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from .. import config, db, iputil, keysvc, upstreamsvc
-from ..services import modelcatalog, modelmap, platforms, proxyroutes, tap as tap_svc
+from ..services import modelcatalog, modelmap, platforms, proxyroutes, codearts, codearts_groups, tap as tap_svc
 from ..config import _env_int
 from ..routers.security import get_config as get_security_config
 
@@ -837,6 +837,13 @@ def _upstream_headers(upstream: dict | None = None) -> dict:
     return headers
 
 
+async def _inference_headers(key: dict | None, upstream: dict, path: str) -> dict:
+    headers = _upstream_headers(upstream)
+    if platforms.key_platform(key) == 'ca':
+        headers.update(await codearts_groups.routing_headers(key, upstream, path))
+    return headers
+
+
 def _upstream_hint(upstream: dict | None) -> str:
     """502/503 时补一句「本次打的是哪个上游、这一跳会不会走出口代理」。
 
@@ -1384,7 +1391,12 @@ async def _chat(request: Request, upstream_path: str):
     url = f'{upstream["base_url"]}{upstream_path}'
     # 转发头只构造一次：既给 httpx，也给抓包（「网关发了什么请求头」是双视角的
     # 一半，另一处再造一份就可能与真正发出去的不一致）。
-    up_headers = _upstream_headers(upstream)
+    try:
+        up_headers = await _inference_headers(key, upstream, upstream_path)
+    except codearts.CodeArtsError as exc:
+        _record(key, ip, requested_model or '', mapped or '', exc.status, 0, 0, 0, ua,
+                str(exc), False, account_expected=False)
+        return _oai_error(str(exc), exc.status, 'api_error', 'ca_group_unavailable')
     # 关联键：上游开启出站转储后，会把「它发往腾讯」的请求 / 响应按这个头落两行，
     # 管理端的「腾讯视角」据此精确对回这一轮（不靠时间窗猜）。
     # 关联键只服务抓包：关闭时不发这个头，交给上游自己按会话生成 32 位 ID。

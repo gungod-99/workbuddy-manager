@@ -1,4 +1,4 @@
-> **WB / CA 修改版**：本 Fork 的默认分支为 `wb-ca`，基于原作者 v2.11.21，加入华为云 CodeArts 账号、平台密钥与模型隔离、积分和自动领取、CA 仪表盘，以及代理选择、HTTP 复制与回调弹窗修复。修改内容与 CA 服务接入方式见 [修改版说明](https://github.com/gungod-99/workbuddy-manager/blob/wb-ca/FORK.md)。`main` 保留原仓库代码；下文为原作者说明。
+> **WB / CA 修改版**：本 Fork 的默认分支为 `wb-ca`，基于原作者 v2.11.21，加入华为云 CodeArts 账号、分组与密钥按组限制、平台模型隔离、积分和自动领取、CA 仪表盘，以及代理选择、HTTP 复制与回调弹窗修复。Linux 安装脚本和 Compose 已接入 CA 服务的自动部署与连接。修改内容与安装方式见 [修改版说明](https://github.com/gungod-99/workbuddy-manager/blob/wb-ca/FORK.md)。`main` 保留原仓库代码；下文为原作者说明。
 
 <div align="center">
 

@@ -87,6 +87,7 @@ def _check_custom_token_allowed(token: str) -> None:
 
 class KeyIn(BaseModel):
     platform: str = Field(default='wb', max_length=8)
+    ca_group_id: int | None = Field(default=None, ge=1, strict=True)
     name: str = Field(min_length=1, max_length=64)
     # 绑定的上游（多上游 / 分组隔离）：null / 0 / 省略 = 默认上游。
     # 类型是 int 而不是 str：界面上是下拉选 id，存成整数才能在外键式查询里用。
@@ -111,6 +112,7 @@ class KeyIn(BaseModel):
 
 class KeyPatch(BaseModel):
     platform: str | None = None
+    ca_group_id: int | None = Field(default=None, ge=1, strict=True)
     name: str | None = None
     # 显式传 null 是**允许**的：把密钥改回默认上游（与 realm 同口径）。
     upstream_id: int | None = None
@@ -217,6 +219,7 @@ def create_key(body: KeyIn, request: Request,
             daily_quota=body.daily_quota,
             upstream_id=uid,
             platform=selected,
+            ca_group_id=body.ca_group_id,
             custom_token=body.custom_token,
         )
     except keysvc.TokenConflict as exc:
@@ -253,6 +256,8 @@ def update_key(key_id: int, body: KeyPatch, user: dict = Depends(security.requir
             patch['upstream_id'] = platforms.key_upstream(selected, patch.get('upstream_id', None if changed else current.get('upstream_id')))
         if changed and 'models' not in patch:
             patch['models'] = []
+        if changed and 'ca_group_id' not in patch:
+            patch['ca_group_id'] = None
         if selected == 'ca':
             patch['realm'] = ''
         if 'models' in patch:

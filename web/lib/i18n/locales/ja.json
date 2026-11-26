@@ -2588,6 +2588,30 @@
       "qualityScope": "選択期間のパネル経由 CA リクエストです。成功率は全ログを使用し、遅延と速度は測定可能な成功リクエストで計算します。",
       "latencyCoverage": "処理時間 / 初回 / 速度のサンプル：{latency} / {first} / {speed}。",
       "otherStatuses": "他の状態が {n} 件あります。"
+    },
+    "groups": {
+      "manage": "グループ管理",
+      "description": "各 Huawei Cloud アカウントは1つのグループに所属できます。キーを指定グループに限定できます。",
+      "name": "グループ名",
+      "create": "グループ作成",
+      "counts": "{accounts} アカウント · {keys} キー",
+      "rename": "名前を変更",
+      "deleteTitle": "グループ削除",
+      "deleteHint": "グループ「{name}」を削除しますか？",
+      "deleteGuard": "アカウントを移動し、キーの紐付けを解除してから削除してください。",
+      "empty": "アカウントグループはありません",
+      "filter": "グループで絞り込む",
+      "all": "すべてのグループ",
+      "ungrouped": "未分類",
+      "moveSelected": "選択した {n} アカウントを移動",
+      "selectAll": "表示中の全アカウントを選択",
+      "selectAccount": "アカウント {name} を選択",
+      "label": "アカウントグループ",
+      "forAccount": "{name} のグループを設定",
+      "loadFailed": "グループを読み込めません。更新して再試行してください。",
+      "unrestricted": "すべての CA アカウント",
+      "keyLabel": "利用可能なアカウントグループ",
+      "keyHint": "再試行も含め、このグループ内のアカウントのみを使用します。利用可能なアカウントがない場合はエラーを返します。「すべての CA アカウント」ではグループを制限しません。"
     }
   }
 }

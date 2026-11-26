@@ -8,6 +8,7 @@
 # 用法：
 #   sudo bash deploy/install.sh                # 完整安装（含上游）
 #   sudo bash deploy/install.sh --skip-upstream  # 已自备 workbuddy2api
+#   sudo bash deploy/install.sh --skip-codearts # 仅安装 WB，不启用 CA
 #   sudo bash APP_DIR=/opt/custom bash deploy/install.sh
 #
 # 上游源码从哪来（按优先级）：
@@ -28,10 +29,12 @@ UPSTREAM_PORT="${UPSTREAM_PORT:-7863}"
 MANAGER_PORT="${MANAGER_PORT:-7864}"
 PY="${PY:-/usr/bin/python3}"
 SKIP_UPSTREAM=0
+SKIP_CODEARTS=0
 
 for arg in "$@"; do
   case "$arg" in
     --skip-upstream) SKIP_UPSTREAM=1 ;;
+    --skip-codearts) SKIP_CODEARTS=1 ;;
     -h|--help)
       sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
@@ -384,6 +387,14 @@ polkit.addRule(function(action, subject) {
 });
 POLKIT
   ok "已写入 polkit 规则：${RUN_USER} 可重启 workbuddy-web.service（一键更新需要）"
+fi
+
+if [ "$SKIP_CODEARTS" -eq 0 ]; then
+  info "安装 / 接入官方 codearts2api 与 CA 账号分组组件"
+  "$RT_PY" "${APP_DIR}/deploy/codearts/install.py" --manager-dir "$APP_DIR" \
+    --manager-user "${RUN_USER:-root}" --no-restart-manager
+else
+  warn "已跳过 CA 安装（--skip-codearts），华为云功能需要另行接入 CA 服务"
 fi
 
 systemctl daemon-reload

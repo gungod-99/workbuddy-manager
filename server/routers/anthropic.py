@@ -36,6 +36,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from .. import config, db, iputil, keysvc, upstreamsvc
+from ..services import codearts
 from ..routers.security import get_config as get_security_config
 from ..services import tap as tap_svc
 # responses 只为复用推理凭据的编解码（`_encode_credential` / `_decode_credential`）：
@@ -1033,7 +1034,12 @@ async def messages(request: Request):
         return _err(str(exc), 503, 'api_error')
     url = f'{upstream["base_url"]}/v1/chat/completions'
     # 转发头只构造一次：既给 httpx，也给抓包（双视角的一半）
-    up_headers = gateway._upstream_headers(upstream)
+    try:
+        up_headers = await gateway._inference_headers(key, upstream, '/v1/chat/completions')
+    except codearts.CodeArtsError as exc:
+        gateway._record(key, ip, model, mapped or '', exc.status, 0, 0, 0, ua, str(exc), False,
+                        account_expected=False)
+        return _err(str(exc), exc.status, 'api_error')
     # 关联键：让上游的出站转储能精确对回这一轮（见 gateway 同名注释）
     # 关联键只服务抓包：关闭时不发这个头，交给上游自己按会话生成 32 位 ID。
     # 开着时也用 32 位 hex（与上游/官方客户端同形），16 位会改变出站头的形状。

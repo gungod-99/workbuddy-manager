@@ -2588,6 +2588,30 @@
       "qualityScope": "只統計所選期間透過面板的 CA 請求。成功率按完整請求日誌計算，延遲與速度只採用可測的成功請求。",
       "latencyCoverage": "耗時 / 首字 / 速度樣本：{latency} / {first} / {speed}。",
       "otherStatuses": "另有 {n} 次其他狀態的請求。"
+    },
+    "groups": {
+      "manage": "管理分組",
+      "description": "每個華為雲帳號可歸屬一個分組，金鑰可限定只使用指定分組。",
+      "name": "分組名稱",
+      "create": "建立分組",
+      "counts": "{accounts} 個帳號 · {keys} 把金鑰",
+      "rename": "重新命名",
+      "deleteTitle": "刪除分組",
+      "deleteHint": "確認刪除分組「{name}」？",
+      "deleteGuard": "請先移走帳號並解除金鑰綁定後再刪除。",
+      "empty": "尚未建立帳號分組",
+      "filter": "篩選帳號分組",
+      "all": "全部分組",
+      "ungrouped": "未分組",
+      "moveSelected": "移動選取的 {n} 個帳號",
+      "selectAll": "選取全部可見帳號",
+      "selectAccount": "選取帳號 {name}",
+      "label": "帳號分組",
+      "forAccount": "設定 {name} 的分組",
+      "loadFailed": "分組載入失敗，請重新整理後再試。",
+      "unrestricted": "全部 CA 帳號",
+      "keyLabel": "可使用的帳號分組",
+      "keyHint": "綁定後僅使用該組帳號，失敗重試也不會跨組；組內無可用帳號時傳回錯誤。選擇「全部 CA 帳號」則不限制分組。"
     }
   }
 }

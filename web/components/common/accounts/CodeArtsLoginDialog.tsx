@@ -3,6 +3,7 @@
 import {useEffect, useRef, useState} from 'react';
 import {ArrowRight, Check, CheckCircle2, Clock3, ExternalLink, Info, Link2, Loader2, RefreshCw, ShieldCheck} from 'lucide-react';
 import {codeartsApi, errText} from '@/lib/api';
+import type {CodeArtsGroup} from '@/lib/types';
 import {callbackIssue, CodeArtsLoginFlow, type LoginState} from '@/lib/codearts-login';
 import {useT} from '@/lib/i18n/provider';
 import {notify} from '@/lib/toast';
@@ -11,21 +12,25 @@ import {Button} from '@/components/ui/button';
 import {Label} from '@/components/ui/label';
 import {Textarea} from '@/components/ui/textarea';
 import {CopyButton} from '@/components/ui/copy-button';
+import {Select, SelectContent, SelectItem, SelectTrigger, SelectValue} from '@/components/ui/select';
 import {Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle} from '@/components/animate-ui/radix/dialog';
 
-export function CodeArtsLoginDialog({open, onOpenChange, onSuccess}: {
+export function CodeArtsLoginDialog({open, onOpenChange, onSuccess, groups = [], defaultGroupId = null}: {
   open: boolean; onOpenChange: (value: boolean) => void; onSuccess: () => Promise<boolean>;
+  groups?: CodeArtsGroup[]; defaultGroupId?: number | null;
 }) {
   const t = useT();
   const [state, setState] = useState<LoginState>({phase: 'idle', login: null, error: ''});
   const [callback, setCallback] = useState('');
   const [validation, setValidation] = useState('');
   const [now, setNow] = useState(Date.now());
-  const latest = useRef({onSuccess, t});
-  latest.current = {onSuccess, t};
+  const [groupId, setGroupId] = useState<number | null>(defaultGroupId);
+  const groupRef = useRef(groupId); groupRef.current = groupId;
+  const latest = useRef({onSuccess, t, defaultGroupId});
+  latest.current = {onSuccess, t, defaultGroupId};
   const flow = useRef<CodeArtsLoginFlow | null>(null);
   if (!flow.current) {
-    flow.current = new CodeArtsLoginFlow({api: codeartsApi, changed: setState, errorText: errText,
+    flow.current = new CodeArtsLoginFlow({api: {...codeartsApi, start: () => codeartsApi.start(groupRef.current)}, changed: setState, errorText: errText,
       messages: {expired: t('ca.loginExpired'), rejected: t('ca.callbackFailed'), failed: t('ca.loginFailed')},
       success: () => {
         setCallback('');
@@ -35,7 +40,7 @@ export function CodeArtsLoginDialog({open, onOpenChange, onSuccess}: {
   }
   useEffect(() => {
     if (!open) return;
-    setCallback(''); setValidation(''); setNow(Date.now());
+    setCallback(''); setValidation(''); setNow(Date.now()); setGroupId(latest.current.defaultGroupId);
     flow.current!.open();
     return () => flow.current!.close();
   }, [open]);
@@ -87,6 +92,13 @@ export function CodeArtsLoginDialog({open, onOpenChange, onSuccess}: {
               </span><span className="min-w-0 break-words">{label}</span>
             </li>)}
           </ol>
+          <div className="space-y-2"><Label>{t('ca.groups.label')}</Label>
+            <Select value={groupId == null ? 'ungrouped' : String(groupId)} disabled={!['idle', 'success', 'failed'].includes(state.phase)}
+              onValueChange={(value) => setGroupId(value === 'ungrouped' ? null : Number(value))}>
+              <SelectTrigger aria-label={t('ca.groups.label')}><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="ungrouped">{t('ca.groups.ungrouped')}</SelectItem>
+                {groups.map((group) => <SelectItem key={group.id} value={String(group.id)}>{group.name}</SelectItem>)}
+              </SelectContent></Select></div>
           {state.phase === 'success' ? <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 px-5 py-8 text-center" role="status">
             <CheckCircle2 className="mx-auto mb-4 size-10 text-emerald-600 dark:text-emerald-400" />
             <p className="text-base font-semibold">{t('ca.loginSuccess')}</p>

@@ -2588,6 +2588,30 @@
       "qualityScope": "선택 기간에 패널을 통한 CA 요청입니다. 성공률은 전체 로그를 사용하며 지연과 속도는 측정 가능한 성공 요청으로 계산합니다.",
       "latencyCoverage": "소요 시간 / 첫 토큰 / 속도 샘플: {latency} / {first} / {speed}.",
       "otherStatuses": "다른 상태의 요청 {n}건이 있습니다."
+    },
+    "groups": {
+      "manage": "그룹 관리",
+      "description": "각 Huawei Cloud 계정은 하나의 그룹에 속할 수 있습니다. 키를 특정 그룹으로 제한할 수 있습니다.",
+      "name": "그룹 이름",
+      "create": "그룹 만들기",
+      "counts": "계정 {accounts}개 · 키 {keys}개",
+      "rename": "이름 바꾸기",
+      "deleteTitle": "그룹 삭제",
+      "deleteHint": "“{name}” 그룹을 삭제할까요?",
+      "deleteGuard": "계정을 이동하고 키 연결을 해제한 후 삭제하세요.",
+      "empty": "계정 그룹이 없습니다",
+      "filter": "계정 그룹 필터",
+      "all": "모든 그룹",
+      "ungrouped": "미지정",
+      "moveSelected": "선택한 계정 {n}개 이동",
+      "selectAll": "표시된 모든 계정 선택",
+      "selectAccount": "{name} 계정 선택",
+      "label": "계정 그룹",
+      "forAccount": "{name}의 그룹 설정",
+      "loadFailed": "그룹을 불러오지 못했습니다. 새로 고친 후 다시 시도하세요.",
+      "unrestricted": "모든 CA 계정",
+      "keyLabel": "허용할 계정 그룹",
+      "keyHint": "재시도를 포함하여 이 그룹의 계정만 사용합니다. 사용 가능한 계정이 없으면 오류를 반환합니다. “모든 CA 계정”을 선택하면 그룹 제한이 없습니다."
     }
   }
 }

@@ -2615,6 +2615,30 @@
       "qualityScope": "CA requests through the panel in the selected range. Success rate uses complete request logs; latency and speed use measurable successful requests.",
       "latencyCoverage": "Duration / first token / speed samples: {latency} / {first} / {speed}.",
       "otherStatuses": "{n} requests have other statuses."
+    },
+    "groups": {
+      "manage": "Manage groups",
+      "description": "Each Huawei Cloud account belongs to at most one group. Keys can be restricted to a specific group.",
+      "name": "Group name",
+      "create": "Create group",
+      "counts": "{accounts} accounts · {keys} keys",
+      "rename": "Rename",
+      "deleteTitle": "Delete group",
+      "deleteHint": "Delete the group “{name}”?",
+      "deleteGuard": "Move its accounts and unbind its keys before deleting.",
+      "empty": "No account groups yet",
+      "filter": "Filter account groups",
+      "all": "All groups",
+      "ungrouped": "Ungrouped",
+      "moveSelected": "Move {n} selected accounts",
+      "selectAll": "Select all visible accounts",
+      "selectAccount": "Select account {name}",
+      "label": "Account group",
+      "forAccount": "Set group for {name}",
+      "loadFailed": "Could not load groups. Refresh and try again.",
+      "unrestricted": "All CA accounts",
+      "keyLabel": "Allowed account group",
+      "keyHint": "Only accounts in this group are used, including retries. An error is returned when none are available. Choose “All CA accounts” to allow every group."
     }
   }
 }

@@ -345,6 +345,10 @@ class WriteEndpointScopeMatrixTest(unittest.TestCase):
         'POST /api/ca/accounts/{account_id}/refresh',
         'POST /api/ca/checkin',
         'PATCH /api/ca/auto-checkin',
+        'POST /api/ca/groups',
+        'PATCH /api/ca/groups/{group_id}',
+        'DELETE /api/ca/groups/{group_id}',
+        'POST /api/ca/accounts/group',
     }
     # 写方法但只要求「已登录」——只读令牌也能调。必须逐个有理由。
     ANY_LOGGED_IN = {

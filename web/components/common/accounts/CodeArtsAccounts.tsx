@@ -1,7 +1,7 @@
 'use client';
 
 import {useRef, useState} from 'react';
-import {CheckCircle2, Coins, Loader2, Pause, Play, Plus, RefreshCw, Search, Trash2, Users} from 'lucide-react';
+import {CheckCircle2, Coins, FolderCog, Loader2, Pause, Play, Plus, RefreshCw, Search, Trash2, Users} from 'lucide-react';
 import {codeartsApi, errText} from '@/lib/api';
 import {useAuth} from '@/lib/auth-context';
 import {useT} from '@/lib/i18n/provider';
@@ -19,10 +19,12 @@ import {SkeletonBar} from '@/components/common/states/SkeletonBar';
 import {Button} from '@/components/ui/button';
 import {Badge} from '@/components/ui/badge';
 import {Input} from '@/components/ui/input';
+import {Select, SelectContent, SelectItem, SelectTrigger, SelectValue} from '@/components/ui/select';
 import {Table, TableBody, TableCell, TableHead, TableHeader, TableRow} from '@/components/ui/table';
 import {CodeArtsLoginDialog} from './CodeArtsLoginDialog';
 import {CodeArtsCheckinCard} from './CodeArtsCheckinCard';
 import {CodeArtsCreditDetails} from './CodeArtsCreditDetails';
+import {CodeArtsGroupsDialog} from './CodeArtsGroupsDialog';
 
 const EMPTY: CodeArtsAccount[] = [];
 
@@ -30,19 +32,25 @@ export function CodeArtsAccounts() {
   const t = useT();
   const {isAdmin} = useAuth();
   const {values, errors, isInitialLoading, isInitialFailed, isRefreshing, reload} = useAsyncAll({
-    accounts: () => codeartsApi.list(), credits: () => codeartsApi.credits(),
+    accounts: () => codeartsApi.list(), credits: () => codeartsApi.credits(), groups: () => codeartsApi.groups(),
   });
   useHeartbeat(reload, 30000);
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
+  const [groupsOpen, setGroupsOpen] = useState(false);
+  const [groupFilter, setGroupFilter] = useState('all');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
   const [refreshingCredits, setRefreshingCredits] = useState(false);
   const [details, setDetails] = useState<CodeArtsCreditAccount | null>(null);
   const operationLock = useRef(false);
   const accounts = values.accounts?.accounts ?? EMPTY;
   const credits = values.credits;
+  const groups = values.groups?.groups ?? [];
   const balances = new Map(credits?.accounts.map((a) => [a.account_id, a]) ?? []);
-  const filtered = accounts.filter((a) => `${a.nickname} ${a.id}`.toLowerCase().includes(query.toLowerCase()));
+  const filtered = accounts.filter((a) => `${a.nickname} ${a.id}`.toLowerCase().includes(query.toLowerCase())
+    && (groupFilter === 'all' || (groupFilter === 'ungrouped' ? a.group_id == null : a.group_id === Number(groupFilter))));
+  const selectedVisible = filtered.filter((a) => selected.has(a.id)).map((a) => a.id);
   const active = accounts.filter((a) => a.enabled && !a.is_expired && a.credential_status === 'available').length;
 
   const operate = async (id: string, action: () => Promise<unknown>) => {
@@ -64,7 +72,9 @@ export function CodeArtsAccounts() {
     <PageHeader title={t('ca.accountsTitle')} description={t('ca.accountsDescription')}
       actions={<><Button variant="outline" size="sm" className="rounded-full" disabled={isRefreshing} onClick={() => void reload()}>
         <RefreshCw className={isRefreshing ? 'animate-spin' : ''} />{t('common.refresh')}
-      </Button>{isAdmin && <Button size="sm" className="rounded-full" onClick={() => setOpen(true)}><Plus />{t('ca.add')}</Button>}</>} />
+      </Button>{isAdmin && <><Button size="sm" variant="outline" className="rounded-full" disabled={!!errors.groups}
+        onClick={() => setGroupsOpen(true)}><FolderCog />{t('ca.groups.manage')}</Button>
+        <Button size="sm" className="rounded-full" disabled={!!errors.groups} onClick={() => setOpen(true)}><Plus />{t('ca.add')}</Button></>}</>} />
     <PageSectionTabs />
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
       <div className="rounded-2xl border border-border/60 bg-muted/30 p-4">
@@ -85,18 +95,39 @@ export function CodeArtsAccounts() {
     <CodeArtsCheckinCard onComplete={reload} />
     {isInitialFailed || errors.accounts ? <LoadError message={t('ca.loadFailed')} onRetry={reload} />
       : isInitialLoading ? <SkeletonBar /> : <>
-        {errors.credits && <LoadError message={t('ca.balanceLoadFailed')} onRetry={refreshCredits} />}
+        {!!errors.credits && <LoadError message={t('ca.balanceLoadFailed')} onRetry={refreshCredits} />}
+        {!!errors.groups && <LoadError message={t('ca.groups.loadFailed')} onRetry={reload} />}
         <section className="overflow-hidden rounded-[20px] border border-border/60 bg-background">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/50 px-4 py-3">
             <div className="relative w-full sm:max-w-xs"><Search className="absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('ca.search')} aria-label={t('ca.search')} className="h-9 rounded-full bg-muted/40 pl-9" />
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value={groupFilter} onValueChange={(value) => {setGroupFilter(value); setSelected(new Set());}} disabled={!!errors.groups}>
+                <SelectTrigger aria-label={t('ca.groups.filter')} className="h-9 w-44 rounded-full"><SelectValue /></SelectTrigger>
+                <SelectContent><SelectItem value="all">{t('ca.groups.all')}</SelectItem>
+                  <SelectItem value="ungrouped">{t('ca.groups.ungrouped')}</SelectItem>
+                  {groups.map((group) => <SelectItem key={group.id} value={String(group.id)}>{group.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {isAdmin && selectedVisible.length > 0 && <Select value="" disabled={busy !== null || !!errors.groups} onValueChange={(value) => {
+                void operate('group', async () => {await codeartsApi.assignGroup(selectedVisible, value === 'ungrouped' ? null : Number(value)); setSelected(new Set());});
+              }}><SelectTrigger aria-label={t('ca.groups.moveSelected', {n: selectedVisible.length})} className="h-9 w-48 rounded-full">
+                <SelectValue placeholder={t('ca.groups.moveSelected', {n: selectedVisible.length})} /></SelectTrigger>
+                <SelectContent><SelectItem value="ungrouped">{t('ca.groups.ungrouped')}</SelectItem>
+                  {groups.map((group) => <SelectItem key={group.id} value={String(group.id)}>{group.name}</SelectItem>)}
+                </SelectContent></Select>}
             </div>
             <Button variant="ghost" size="sm" className="rounded-full" disabled={refreshingCredits} onClick={() => void refreshCredits()}>
               <RefreshCw className={refreshingCredits ? 'animate-spin' : ''} />{t('ca.refreshCredits')}
             </Button>
           </div>
           <Table><TableHeader className="bg-muted/40"><TableRow className="hover:bg-transparent">
+            {isAdmin && <TableHead className="w-10 pl-4"><input type="checkbox" className="size-4 cursor-pointer accent-primary" aria-label={t('ca.groups.selectAll')}
+              checked={filtered.length > 0 && selectedVisible.length === filtered.length}
+              onChange={(event) => setSelected(new Set(event.target.checked ? filtered.map((a) => a.id) : []))} /></TableHead>}
             <TableHead className="h-11 pl-5 text-left">{t('metric.name')}</TableHead>
+            <TableHead className="text-left">{t('ca.groups.label')}</TableHead>
             <TableHead className="text-left">{t('ca.balance')}</TableHead>
             <TableHead className="text-left">{t('ca.todayCheckin')}</TableHead>
             <TableHead className="text-left">{t('accounts.colStatus')}</TableHead>
@@ -107,10 +138,20 @@ export function CodeArtsAccounts() {
               const credit = balances.get(a.id);
               const checkin = credit?.checkin;
               return <TableRow key={a.id}>
+                {isAdmin && <TableCell className="pl-4"><input type="checkbox" className="size-4 cursor-pointer accent-primary" checked={selected.has(a.id)} aria-label={t('ca.groups.selectAccount', {name: a.nickname})}
+                  onChange={(event) => setSelected((current) => {const next = new Set(current); if (event.target.checked) next.add(a.id); else next.delete(a.id); return next;})} /></TableCell>}
                 <TableCell className="py-4 pl-5 text-left">
                   <div className="max-w-[220px] truncate font-medium" title={a.nickname}>{a.nickname}</div>
                   <div className="mt-1 font-mono text-[10px] text-muted-foreground">{a.id}</div>
                 </TableCell>
+                <TableCell className="text-left">{isAdmin ? <Select value={a.group_id == null ? 'ungrouped' : String(a.group_id)}
+                  disabled={busy !== null || !!errors.groups} onValueChange={(value) => void operate(a.id,
+                    () => codeartsApi.assignGroup([a.id], value === 'ungrouped' ? null : Number(value)))}>
+                  <SelectTrigger className="h-8 w-36 rounded-full text-xs" aria-label={t('ca.groups.forAccount', {name: a.nickname})}><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="ungrouped">{t('ca.groups.ungrouped')}</SelectItem>
+                    {groups.map((group) => <SelectItem key={group.id} value={String(group.id)}>{group.name}</SelectItem>)}
+                  </SelectContent></Select> : <Badge variant="outline" className="rounded-full text-xs">
+                    {groups.find((group) => group.id === a.group_id)?.name ?? t('ca.groups.ungrouped')}</Badge>}</TableCell>
                 <TableCell className="text-left">
                   {credit?.balance ? <button type="button" className="group text-left" onClick={() => setDetails(credit)} aria-label={t('ca.creditDetailsFor', {name: a.nickname})}>
                     <div className="text-base font-semibold tabular-nums group-hover:underline">{fmtNumber(credit.balance.total)}</div>
@@ -144,10 +185,12 @@ export function CodeArtsAccounts() {
               </TableRow>;
             })}
           </TableBody></Table>
-          {!filtered.length && <EmptyState icon={Users} title={query ? t('ca.noMatches') : t('ca.empty')} description={query ? t('ca.searchHint') : t('ca.emptyHint')} />}
+          {!filtered.length && <EmptyState icon={Users} title={query || groupFilter !== 'all' ? t('ca.noMatches') : t('ca.empty')} description={query || groupFilter !== 'all' ? t('ca.searchHint') : t('ca.emptyHint')} />}
         </section>
       </>}
-    <CodeArtsLoginDialog open={open} onOpenChange={setOpen} onSuccess={reload} />
+    <CodeArtsLoginDialog open={open} onOpenChange={setOpen} onSuccess={reload} groups={groups}
+      defaultGroupId={Number(groupFilter) > 0 ? Number(groupFilter) : null} />
+    <CodeArtsGroupsDialog open={groupsOpen} onOpenChange={setGroupsOpen} groups={groups} onSaved={reload} />
     <CodeArtsCreditDetails account={details} onClose={() => setDetails(null)} />
   </div>;
 }

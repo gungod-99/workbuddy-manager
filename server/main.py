@@ -26,7 +26,7 @@ from .routers import (
 )
 from .services import (
     accountlog, accountrisk, autoupdate, cooling, dailyplan, gatewaycors, modelrecovery, pgsync,
-    renew, tasklog, taskrun, watchdog,
+    renew, tasklog, taskrun, watchdog, codearts_setup,
 )
 
 # 最早时刻把标准输出/错误钉成 UTF-8：Windows 中文区域默认按 cp936 编码，日志里
@@ -41,6 +41,10 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     config.ensure_dirs()
     db.connect()
+    try:
+        codearts_setup.configure_from_file()
+    except ValueError as exc:
+        logger.error('%s', exc)
     security.load_users()  # 首次启动会自动生成管理员并打印一次密码
     weak_admins = security.weak_admin_passwords()
     if weak_admins:

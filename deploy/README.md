@@ -1,5 +1,7 @@
 # 部署指南
 
+> 本 Fork 的 `wb-ca` 分支会自动部署 CodeArts 服务和账号分组组件。Linux/systemd、已有实例补装 CA、Compose 与 8090 端口的具体命令见 [WB / CA 修改版说明](../FORK.md#ca-服务接入)。下文的原项目说明主要针对 WB 上游；`--skip-upstream` 不会跳过 CA，需跳过 CA 时另加 `--skip-codearts`。
+
 本项目管理端**依赖上游 workbuddy2api**（提供账号池调度与 OpenAI 兼容接口）。
 单独 clone 本仓库是跑不起来的 —— 为此我们提供了一键脚本，会在干净机器上安装好两者。
 

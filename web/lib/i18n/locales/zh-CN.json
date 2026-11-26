@@ -2352,6 +2352,30 @@
       "qualityScope": "只统计所选期间通过面板的 CA 请求。成功率按完整请求日志计算，延迟与速度只采用可测的成功请求。",
       "latencyCoverage": "耗时 / 首字 / 速度样本：{latency} / {first} / {speed}。",
       "otherStatuses": "另有 {n} 次其他状态的请求。"
+    },
+    "groups": {
+      "manage": "管理分组",
+      "description": "每个华为云账号可归属一个分组，密钥可限定只使用指定分组。",
+      "name": "分组名称",
+      "create": "创建分组",
+      "counts": "{accounts} 个账号 · {keys} 把密钥",
+      "rename": "重命名",
+      "deleteTitle": "删除分组",
+      "deleteHint": "确认删除分组“{name}”？",
+      "deleteGuard": "请先移走账号并解除密钥绑定后再删除。",
+      "empty": "尚未创建账号分组",
+      "filter": "筛选账号分组",
+      "all": "全部分组",
+      "ungrouped": "未分组",
+      "moveSelected": "移动选中 {n} 个账号",
+      "selectAll": "选择全部可见账号",
+      "selectAccount": "选择账号 {name}",
+      "label": "账号分组",
+      "forAccount": "设置 {name} 的分组",
+      "loadFailed": "分组加载失败，请刷新后重试。",
+      "unrestricted": "全部 CA 账号",
+      "keyLabel": "可使用的账号分组",
+      "keyHint": "绑定后仅使用该组账号，失败重试也不会跨组；组内无可用账号时返回错误。选择“全部 CA 账号”则不限制分组。"
     }
   }
 }

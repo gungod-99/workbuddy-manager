@@ -9,7 +9,7 @@ import sqlite3
 import time
 
 from . import db
-from .services import platforms
+from .services import platforms, codearts_groups
 from .iputil import ip_matches
 
 TOKEN_PREFIX = 'wbk_'
@@ -288,6 +288,7 @@ def _parse(row) -> dict:
         'models': _json_list(row['models']),
         'realm': _norm_realm(row['realm']),
         'platform': platforms.normalize(_row_get(row, 'platform') or 'wb'),
+        'ca_group_id': _row_get(row, 'ca_group_id'),
         # 绑定的上游接入点（多上游 / 分组隔离）。None = 默认上游 —— 见 upstreamsvc
         # 的模块注释：默认上游不是数据库里的某一行，所以这里保持 None 而不是补 0。
         'upstream_id': _norm_upstream_id(row['upstream_id']),
@@ -329,6 +330,7 @@ def get_key(key_id: int) -> dict | None:
     return _parse(row) if row else None
 
 
+@codearts_groups.locked
 def create_key(
     name: str,
     expires_at: int | None = None,
@@ -343,6 +345,7 @@ def create_key(
     custom_token: str | None = None,
     *,
     platform: str = 'wb',
+    ca_group_id: int | None = None,
     _conn: sqlite3.Connection | None = None,
 ) -> dict:
     """创建一个密钥。返回含**明文 token** 的字典。
@@ -365,14 +368,15 @@ def create_key(
     安全性不能跟着降级。
     """
     platform = platforms.normalize(platform)
+    ca_group_id = codearts_groups.validate_key(platform, ca_group_id)
     if platform == 'ca':
         realm = ''
     token = _norm_custom_token(custom_token) if custom_token is not None \
         else ('cak_' if platform == 'ca' else TOKEN_PREFIX) + secrets.token_urlsafe(32)
     sql = ('INSERT INTO api_keys(name, key_hash, key_plain, prefix, enabled, expires_at, '
            'max_ips, ip_allowlist, models, realm, quota, used_tokens, quota_credit, '
-           'used_credit, created_at, upstream_id, daily_quota, platform) '
-           'VALUES(?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?, ?)')
+           'used_credit, created_at, upstream_id, daily_quota, platform, ca_group_id) '
+           'VALUES(?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?, ?, ?)')
     args = (
         name,
         _hash(token),
@@ -389,6 +393,7 @@ def create_key(
         _norm_upstream_id(upstream_id),
         _norm_daily_quota(daily_quota),
         platform,
+        ca_group_id,
     )
     if _conn is not None:
         try:
@@ -434,11 +439,16 @@ def reveal_key(key_id: int) -> dict | None:
             'key': plain}
 
 
+@codearts_groups.locked
 def update_key(key_id: int, patch: dict) -> dict | None:
     row = db.query_one('SELECT * FROM api_keys WHERE id = ?', (key_id,))
     if not row:
         return None
     fields: dict[str, object] = {}
+    selected = platforms.normalize(patch.get('platform', row['platform']))
+    group_id = patch.get('ca_group_id', _row_get(row, 'ca_group_id'))
+    if 'platform' in patch or 'ca_group_id' in patch:
+        fields['ca_group_id'] = codearts_groups.validate_key(selected, group_id)
     if 'platform' in patch:
         fields['platform'] = platforms.normalize(patch['platform'])
         if fields['platform'] == 'ca':

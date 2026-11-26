@@ -15,6 +15,9 @@
 
 services:
   workbuddy-manager:
+    depends_on:
+      codearts2api:
+        condition: service_healthy
     build:
       context: .
       # 可选：Alpine 软件源镜像（镜像基于 python:3.12-alpine）。
@@ -64,6 +67,9 @@ services:
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
+      WB_CODEARTS_BASE: http://codearts2api:8092
+      WB_CODEARTS_CONNECTION_FILE: /run/codearts-connection/connection.json
+      WB_MANAGER_REPO: gungod-99/workbuddy-manager
       # 首启管理员密码；不设则随机生成并打印到日志（推荐首启后立即改）
       # WB_ADMIN_PASSWORD: "改成你的强密码"
       # 上游地址：若上游与本品在同一 compose 网络，用服务名；否则填宿主机地址
@@ -92,8 +98,9 @@ services:
       # **只监听本机**：管理端必须藏在反向代理之后。
       # 若确需直接从别的机器访问，改成 "7864:7864"，但请先确保有 HTTPS 与访问控制——
       # 管理端持有全部账号凭据，直接暴露到公网是被打穿的常见原因。
-      - "127.0.0.1:7864:7864"
+      - "${WB_BIND_HOST:-127.0.0.1}:${WB_HTTP_PORT:-7864}:7864"
     volumes:
+      - codearts-connection:/run/codearts-connection:ro
       # 数据库、日志、更新状态、上游版本固定标记都在这里。
       # 必须持久化，否则重建容器会丢失统计与审计记录。
       #
@@ -169,7 +176,23 @@ services:
       retries: 3
       start_period: 10s
 
+  codearts2api:
+    build:
+      context: .
+      dockerfile: deploy/codearts/Dockerfile
+    image: workbuddy-codearts:0.1.12-scope1
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      WB_CA_MANAGER_BASE: http://codearts2api:8092
+    volumes:
+      - codearts-data:/data
+      - codearts-connection:/connection
+    # CA 管理端与内部网关均不发布到宿主机；仅 Manager 经容器网络访问。
+
 # 顶层卷声明：只在 .env 里设置 WB_DATA_VOLUME=wb-manager-data 时才会被引用。
 # 默认（未设变量）仍走 ./data，这个卷不会被写入数据，也不影响已有部署。
 volumes:
+  codearts-data:
+  codearts-connection:
   wb-manager-data:

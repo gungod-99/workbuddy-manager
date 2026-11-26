@@ -112,6 +112,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
   -- 界面上单独标注以便管理员补填。新建密钥一律要选一个版本。
   realm         TEXT    NOT NULL DEFAULT '',
   platform      TEXT    NOT NULL DEFAULT 'wb',
+  ca_group_id   INTEGER,
   quota         INTEGER NOT NULL DEFAULT 0,
   used_tokens   INTEGER NOT NULL DEFAULT 0,
   -- 积分额度与已用量（issue #27）：与 token 限额**各自独立**，0 = 不限。
@@ -440,6 +441,17 @@ CREATE INDEX IF NOT EXISTS idx_packet_shares ON red_packet_shares(packet_id);
 -- api_key 明文存储：与上游 config.json 里的 api_key 同等敏感，而本库权限已收到
 -- 仅属主可读写（见 _restrict_db_permissions）。不引加密依赖的理由同 red_packet_shares
 -- 的注释：自己写加密比明文更危险（会让人以为它是安全的）。
+CREATE TABLE IF NOT EXISTS codearts_groups (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS codearts_account_groups (
+  account_id TEXT PRIMARY KEY,
+  group_id   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_codearts_membership ON codearts_account_groups(group_id);
+
 CREATE TABLE IF NOT EXISTS upstreams (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   name       TEXT    NOT NULL,
@@ -798,6 +810,7 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     # 「拒绝删」都不合适 —— 本项目在应用层做「被引用就拒绝删」（见 upstreamsvc）。
     ('api_keys', 'upstream_id', 'INTEGER'),
     ('api_keys', 'platform', "TEXT NOT NULL DEFAULT 'wb'"),
+    ('api_keys', 'ca_group_id', 'INTEGER'),
     ('upstreams', 'platform', "TEXT NOT NULL DEFAULT 'wb'"),
     # 分组（账号池）的**本地账号目录**：面板据此列账号 / 添号 / 移动账号。
     # 空 = 不做账号管理（该分组只用于密钥转发）。默认分组的目录来自 WB_AUTH_DIR，

@@ -522,7 +522,13 @@ export const upstreamApi = {
 export const codeartsApi = {
   dashboard: (days = 14) => get<import('./types').CodeArtsDashboardData>('/api/ca/dashboard', {days}),
   list: () => get<{platform: 'ca'; accounts: import('./types').CodeArtsAccount[]}>('/api/ca/accounts'),
-  start: () => post<import('./types').CodeArtsLoginSession>('/api/ca/auth/start'),
+  start: (groupId: number | null = null) => post<import('./types').CodeArtsLoginSession>('/api/ca/auth/start', {group_id: groupId}),
+  groups: () => get<{groups: import('./types').CodeArtsGroup[]}>('/api/ca/groups'),
+  createGroup: (name: string) => post<import('./types').CodeArtsGroup>('/api/ca/groups', {name}),
+  renameGroup: (id: number, name: string) => patch<import('./types').CodeArtsGroup>(`/api/ca/groups/${id}`, {name}),
+  deleteGroup: (id: number) => del<{ok: boolean}>(`/api/ca/groups/${id}`),
+  assignGroup: (accountIds: string[], groupId: number | null) => post<{ok: boolean}>(
+    '/api/ca/accounts/group', {account_ids: accountIds, group_id: groupId}),
   poll: (accountId: string) => get<{done: boolean; success: boolean; error?: string}>(
     `/api/ca/auth/${encodeURIComponent(accountId)}/poll`),
   callback: (accountId: string, callbackUrl: string) => post<{accepted: boolean}>(

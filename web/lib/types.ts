@@ -1,9 +1,18 @@
 export type Role = 'admin' | 'viewer';
 export type Platform = 'wb' | 'ca';
 
+export interface CodeArtsGroup {
+  id: number;
+  name: string;
+  created_at: number;
+  account_count: number;
+  key_count: number;
+}
+
 export interface CodeArtsAccount {
   id: string;
   platform: 'ca';
+  group_id?: number | null;
   nickname: string;
   enabled: boolean;
   expires_at: number | null;
@@ -608,6 +617,7 @@ export interface UpstreamEndpoint {
 
 export interface ApiKey {
   platform?: Platform;
+  ca_group_id?: number | null;
   id: number;
   name: string;
   prefix: string;

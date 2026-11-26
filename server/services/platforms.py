@@ -33,7 +33,7 @@ def codearts_connection() -> tuple[str, str]:
         raise ValueError('CA 上游配置异常')
     base = str(value.get('base_url') or '').rstrip('/')
     admin_key = str(value.get('admin_key') or '')
-    if base != 'http://127.0.0.1:8092' or not admin_key:
+    if base != config.CODEARTS_BASE or not admin_key:
         raise ValueError('CA 上游尚未配置或已停用')
     return base, admin_key
 

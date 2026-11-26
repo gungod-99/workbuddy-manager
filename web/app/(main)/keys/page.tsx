@@ -5,7 +5,7 @@ import {KeyRound, Plus, Trash2, Ban, CircleCheck, Pencil, RotateCcw, Copy, Check
 import {useHeartbeat} from '@/lib/use-heartbeat';
 import {useAsyncAll} from '@/lib/use-async-data';
 import {notify} from '@/lib/toast';
-import {keyApi, upstreamsApi, errText} from '@/lib/api';
+import {keyApi, upstreamsApi, codeartsApi, errText} from '@/lib/api';
 import {BASE_PATH} from '@/lib/base-path';
 import type {ApiKey, KeyImportResult, KeyImportStatus, UpstreamEndpoint, Platform} from '@/lib/types';
 import {copyText, fmtDateTime, fmtNumber} from '@/lib/format';
@@ -56,6 +56,7 @@ import {
 
 interface FormState {
   platform: Platform;
+  ca_group_id: number | null;
   name: string;
   /** 新建：0 = 永不过期；编辑：0 = 保持当前有效期不变 */
   expiresDays: string;
@@ -84,6 +85,7 @@ interface FormState {
 
 const emptyForm: FormState = {
   platform: 'wb',
+  ca_group_id: null,
   name: '',
   expiryMode: 'keep',
   expiresDays: '0',
@@ -129,6 +131,7 @@ export default function KeysPage() {
   const {values, errors, isInitialLoading, isInitialFailed, isRefreshing, reload} = useAsyncAll({
     keys: () => keyApi.list(),
     upstreams: () => upstreamsApi.list(),
+    caGroups: () => codeartsApi.groups(),
   }, []);
 
   const keys: ApiKey[] = values.keys ?? EMPTY_KEYS;
@@ -254,6 +257,7 @@ export default function KeysPage() {
     setEditing(k);
     setForm({
       platform: k.platform || 'wb',
+      ca_group_id: k.ca_group_id ?? null,
       name: k.name,
       // 默认不改动有效期；要续期/取消过期需显式选择
       expiryMode: 'keep',
@@ -277,6 +281,10 @@ export default function KeysPage() {
     // 同步锁：必须在任何 await / setState 之前判断并置位。
     // 只看 `busy` 不够——那个状态要等重渲染才生效，连点会漏过去。
     if (submitting.current) return;
+    if (form.platform === 'ca' && (errors.caGroups || !values.caGroups)) {
+      notify.err(t('ca.groups.loadFailed'));
+      return;
+    }
     if (!form.name.trim()) {
       notify.err(t('keys.nameRequired'));
       return;
@@ -302,6 +310,7 @@ export default function KeysPage() {
         // 例外是用户在新建弹窗里显式打开了「不限制」（form.realm === ''，
         // issue #191）：那是明确的意图，不能被页面版本覆盖掉。
         platform: form.platform,
+        ca_group_id: form.platform === 'ca' ? form.ca_group_id : null,
         realm: form.platform === 'ca' ? '' : editing || form.realm === '' ? form.realm : realm,
         // 绑定上游（多上游 / 分组隔离）：null = 默认上游，照传——
         // 后端以它区分「显式改回默认上游」与「本次没提交该字段」（PATCH 语义）。
@@ -670,6 +679,9 @@ export default function KeysPage() {
                 <TableRow key={k.id} className="border-b border-border/40">
                   <TableCell className="pl-4 text-sm font-medium">
                     <div>{k.name} <Badge variant="outline" className="ml-1 rounded-full text-[10px]">{(k.platform || 'wb').toUpperCase()}</Badge></div>
+                    {k.platform === 'ca' && <Badge variant="secondary" className="mt-1 rounded-full text-[10px]">
+                      {k.ca_group_id == null ? t('ca.groups.unrestricted') : values.caGroups?.groups.find((group) => group.id === k.ca_group_id)?.name ?? `#${k.ca_group_id}`}
+                    </Badge>}
                     {/* 只标「绑定了上游」的行：默认上游是绝大多数，每行都标等于没标，
                         有值才说明这把钥匙走的是另一个账号池（见 server/upstreamsvc.py） */}
                     {k.upstream_id ? (
@@ -1001,7 +1013,7 @@ export default function KeysPage() {
                 <Select value={form.platform} onValueChange={(value) => {
                   const next = value as Platform;
                   setForm({...form, platform: next, realm: next === 'ca' ? '' : realm,
-                    upstream_id: null, models: ''});
+                    upstream_id: null, ca_group_id: null, models: ''});
                   setUnknownModels(null);
                 }}>
                   <SelectTrigger aria-label={t('platform.select')}><SelectValue /></SelectTrigger>
@@ -1113,6 +1125,17 @@ export default function KeysPage() {
                   {t(form.platform === 'ca' ? 'ca.keyHint' : 'keys.upstreamHint')}
                 </p>
               </div>
+              {form.platform === 'ca' && <div className="space-y-1.5">
+                <Label className="text-[11px] text-muted-foreground">{t('ca.groups.keyLabel')}</Label>
+                <Select value={form.ca_group_id == null ? '__all__' : String(form.ca_group_id)} disabled={!!errors.caGroups}
+                  onValueChange={(value) => setForm({...form, ca_group_id: value === '__all__' ? null : Number(value)})}>
+                  <SelectTrigger aria-label={t('ca.groups.keyLabel')}><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="__all__">{t('ca.groups.unrestricted')}</SelectItem>
+                    {values.caGroups?.groups.map((group) => <SelectItem key={group.id} value={String(group.id)}>{group.name}</SelectItem>)}
+                  </SelectContent></Select>
+                <p className="text-[11px] leading-5 text-muted-foreground">{t('ca.groups.keyHint')}</p>
+                {!!errors.caGroups && <LoadError message={t('ca.groups.loadFailed')} onRetry={reload} />}
+              </div>}
               {/* 密钥形态（issue #447）：只在新建时出现 —— 创建后换 token 等于换
                   一把密钥，已有客户端的配置会立刻失效，不该提供入口。
                   不填 = 默认 wbk_ 随机串；填了需要部署开启 WB_KEY_CUSTOM_ENABLED，

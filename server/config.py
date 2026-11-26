@@ -73,6 +73,7 @@ DATA_DIR = Path(_env('WB_DATA_DIR', str(ROOT / 'data')))
 DB_PATH = Path(_env('WB_DB', str(DATA_DIR / 'manager.db')))
 USERS_FILE = Path(_env('WB_USERS_FILE', str(DATA_DIR / 'users.json')))
 STATIC_DIR = Path(_env('WB_STATIC_DIR', str(ROOT / 'web' / 'out')))
+CODEARTS_BASE = _env('WB_CODEARTS_BASE', 'http://127.0.0.1:8092').rstrip('/')
 
 # 子路径部署时的 URL 前缀，留空 = 根路径部署（默认）。
 #
