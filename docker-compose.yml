@@ -69,6 +69,8 @@ services:
       TZ: Asia/Shanghai
       WB_CODEARTS_BASE: http://codearts2api:8092
       WB_CODEARTS_CONNECTION_FILE: /run/codearts-connection/connection.json
+      WB_UPSTREAM_TIMEOUT: ${WB_UPSTREAM_TIMEOUT:-120}
+      WB_CODEARTS_TIMEOUT: ${WB_CODEARTS_TIMEOUT:-600}
       WB_MANAGER_REPO: gungod-99/workbuddy-manager
       # 首启管理员密码；不设则随机生成并打印到日志（推荐首启后立即改）
       # WB_ADMIN_PASSWORD: "改成你的强密码"

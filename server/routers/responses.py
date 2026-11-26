@@ -44,7 +44,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from .. import config, keysvc, upstreamsvc
-from ..services import codearts
+from ..services import codearts, platforms
+from ..services.errtext import err_text
 from ..services import tap as tap_svc
 from . import gateway
 
@@ -1762,7 +1763,7 @@ async def _handle(request: Request) -> JSONResponse | StreamingResponse:
 
     if not stream:
         try:
-            async with config.http_client(config.UPSTREAM_TIMEOUT, connect=5) as client:
+            async with config.http_client(gateway._inference_timeout(upstream), connect=5) as client:
                 resp = await client.post(url, json=payload,
                                          headers=up_headers)
             latency = int((time.time() - started) * 1000)
@@ -1827,18 +1828,19 @@ async def _handle(request: Request) -> JSONResponse | StreamingResponse:
                 else 'invalid_custom_tool_arguments')
         except Exception as exc:  # noqa: BLE001
             latency = int((time.time() - started) * 1000)
-            gateway._record(key, ip, model, mapped or '', 502, 0, 0, latency, ua, str(exc), False,
+            error = err_text(exc)
+            gateway._record(key, ip, model, mapped or '', 502, 0, 0, latency, ua, error, False,
                             account_expected=gateway._account_expected_after_error(exc))
             tap_svc.capture(
                 body=client_body, headers=request.headers.items(), key=key, ua=ua,
                 path='/v1/responses', protocol='responses', status=502,
-                latency_ms=latency, stream=False, error=str(exc),
+                latency_ms=latency, stream=False, error=error,
                 upstream_body=payload, upstream_headers=up_headers, trace_id=trace_id,
             )
-            return _failed(f'上游不可用：{exc}', 502)
+            return _failed(f'上游不可用：{error}', 502)
 
     # ── 流式 ──
-    client = config.http_client(config.UPSTREAM_TIMEOUT, connect=5)
+    client = config.http_client(gateway._inference_timeout(upstream), connect=5)
     try:
         req = client.build_request('POST', url, json=payload,
                                    headers=up_headers)
@@ -1846,9 +1848,10 @@ async def _handle(request: Request) -> JSONResponse | StreamingResponse:
     except Exception as exc:  # noqa: BLE001
         await client.aclose()
         latency = int((time.time() - started) * 1000)
-        gateway._record(key, ip, model, mapped or '', 502, 0, 0, latency, ua, str(exc), True,
+        error = err_text(exc)
+        gateway._record(key, ip, model, mapped or '', 502, 0, 0, latency, ua, error, True,
                         account_expected=gateway._account_expected_after_error(exc))
-        return _failed(f'上游不可用：{exc}', 502)
+        return _failed(f'上游不可用：{error}', 502)
 
     # 上游直接报错：**开流之前**用真实状态码回掉。
     # 若开始流式（HTTP 200 已定），状态码就没法再改了——错误只能裹进事件里，
@@ -1912,6 +1915,11 @@ async def _handle(request: Request) -> JSONResponse | StreamingResponse:
                 while '\n' in pending:
                     line, pending = pending.split('\n', 1)
                     line = line.strip()
+                    if line.startswith(':') and platforms.upstream_platform(upstream) == 'ca':
+                        comment = line + '\n\n'
+                        client_stream.feed(comment)
+                        yield comment.encode('utf-8')
+                        continue
                     if not line.startswith('data:'):
                         continue
                     raw = line[5:].strip()

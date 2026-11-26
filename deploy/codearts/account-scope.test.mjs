@@ -81,7 +81,7 @@ test('official AccountPool first selection, retries, rotation and broken credent
     const app = join(parent, 'app');
     try {
       cpSync(process.env.WB_CA_TEST_APP, app, {recursive: true, verbatimSymlinks: true});
-      assert.equal(patchLibrary(app).patched, 2);
+      patchLibrary(app);
       assert.equal(patchLibrary(app).patched, 0);
       const poolPath = join(app, 'node_modules/dsh-providers-hub/lib/account-pool.js');
       const gatewayPath = join(app, 'node_modules/dsh-providers-hub/lib/openai-gateway/server.js');

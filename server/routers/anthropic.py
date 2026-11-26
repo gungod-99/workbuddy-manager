@@ -36,7 +36,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from .. import config, db, iputil, keysvc, upstreamsvc
-from ..services import codearts
+from ..services import codearts, platforms
+from ..services.errtext import err_text
 from ..routers.security import get_config as get_security_config
 from ..services import tap as tap_svc
 # responses 只为复用推理凭据的编解码（`_encode_credential` / `_decode_credential`）：
@@ -1050,7 +1051,7 @@ async def messages(request: Request):
 
     if not stream:
         try:
-            async with config.http_client(config.UPSTREAM_TIMEOUT, connect=5) as client:
+            async with config.http_client(gateway._inference_timeout(upstream), connect=5) as client:
                 resp = await client.post(url, json=payload,
                                          headers=up_headers)
             latency = int((time.time() - started) * 1000)
@@ -1106,18 +1107,19 @@ async def messages(request: Request):
                                     model, thinking=want_thinking))
         except Exception as exc:  # noqa: BLE001
             latency = int((time.time() - started) * 1000)
-            gateway._record(key, ip, model, mapped or '', 502, 0, 0, latency, ua, str(exc), False,
+            error = err_text(exc)
+            gateway._record(key, ip, model, mapped or '', 502, 0, 0, latency, ua, error, False,
                             account_expected=gateway._account_expected_after_error(exc))
             tap_svc.capture(
                 body=client_body, headers=request.headers.items(), key=key, ua=ua,
                 path='/v1/messages', protocol='anthropic', status=502,
-                latency_ms=latency, stream=False, error=str(exc),
+                latency_ms=latency, stream=False, error=error,
                 upstream_body=payload, upstream_headers=up_headers, trace_id=trace_id,
             )
-            return _err(f'上游不可用：{exc}', 502, 'api_error')
+            return _err(f'上游不可用：{error}', 502, 'api_error')
 
     # ── 流式 ────────────────────────────────────────────────
-    client = config.http_client(config.UPSTREAM_TIMEOUT, connect=5)
+    client = config.http_client(gateway._inference_timeout(upstream), connect=5)
     try:
         req = client.build_request('POST', url, json=payload,
                                    headers=up_headers)
@@ -1125,9 +1127,10 @@ async def messages(request: Request):
     except Exception as exc:  # noqa: BLE001
         await client.aclose()
         latency = int((time.time() - started) * 1000)
-        gateway._record(key, ip, model, mapped or '', 502, 0, 0, latency, ua, str(exc), True,
+        error = err_text(exc)
+        gateway._record(key, ip, model, mapped or '', 502, 0, 0, latency, ua, error, True,
                         account_expected=gateway._account_expected_after_error(exc))
-        return _err(f'上游不可用：{exc}', 502, 'api_error')
+        return _err(f'上游不可用：{error}', 502, 'api_error')
 
     status_code = resp.status_code
 
@@ -1175,6 +1178,11 @@ async def messages(request: Request):
                 while '\n' in pending:
                     line, pending = pending.split('\n', 1)
                     line = line.strip()
+                    if line.startswith(':') and platforms.upstream_platform(upstream) == 'ca':
+                        comment = line + '\n\n'
+                        client_stream.feed(comment)
+                        yield comment.encode('utf-8')
+                        continue
                     if not line.startswith('data:'):
                         continue
                     raw = line[5:].strip()

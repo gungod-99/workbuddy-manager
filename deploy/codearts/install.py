@@ -196,8 +196,10 @@ def restore_on_failure(destination: Path, connection: Path, unit: Path):
     library = (destination / 'app/node_modules/dsh-providers-hub/lib').resolve()
     if not library.is_relative_to((destination / 'app').resolve()):
         raise ValueError('CA dependency escaped its application directory')
+    gateway = destination / 'app/dist-server/modules/gateway'
     paths = [library / 'account-pool.js', library / 'openai-gateway/server.js',
-             library / 'wb-account-scope.mjs', connection, unit]
+             library / 'wb-account-scope.mjs', library / 'wb-sse-keepalive.mjs',
+             gateway / 'gateway.controller.js', gateway / 'wb-proxy-lifecycle.mjs', connection, unit]
     saved = {}
     for index, path in enumerate(paths):
         if path.exists():

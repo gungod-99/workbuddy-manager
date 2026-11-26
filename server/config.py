@@ -87,6 +87,8 @@ BASE_PATH = f'/{_BASE_PATH_RAW}' if _BASE_PATH_RAW else ''
 
 # 网络
 UPSTREAM_TIMEOUT = _env_int('WB_UPSTREAM_TIMEOUT', 120)
+# CA can wait for provider-side account rotation and the first generated chunk.
+CODEARTS_TIMEOUT = max(1, _env_int('WB_CODEARTS_TIMEOUT', 600))
 TENCENT_TIMEOUT = _env_int('WB_TENCENT_TIMEOUT', 15)
 # 「全部签到」的并发上限：太低会拖到前端超时（几十个账号时），
 # 太高又容易触发腾讯风控。5 是保守且够快的取值。

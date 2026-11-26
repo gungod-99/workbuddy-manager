@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from .. import config, db, iputil, keysvc, upstreamsvc
 from ..services import modelcatalog, modelmap, platforms, proxyroutes, codearts, codearts_groups, tap as tap_svc
+from ..services.errtext import err_text
 from ..config import _env_int
 from ..routers.security import get_config as get_security_config
 
@@ -844,6 +845,11 @@ async def _inference_headers(key: dict | None, upstream: dict, path: str) -> dic
     return headers
 
 
+def _inference_timeout(upstream: dict) -> int:
+    return (config.CODEARTS_TIMEOUT if platforms.upstream_platform(upstream) == 'ca'
+            else config.UPSTREAM_TIMEOUT)
+
+
 def _upstream_hint(upstream: dict | None) -> str:
     """502/503 时补一句「本次打的是哪个上游、这一跳会不会走出口代理」。
 
@@ -1408,7 +1414,7 @@ async def _chat(request: Request, upstream_path: str):
 
     if not stream:
         try:
-            async with config.http_client(config.UPSTREAM_TIMEOUT, connect=5) as client:
+            async with config.http_client(_inference_timeout(upstream), connect=5) as client:
                 resp = await client.post(url, json=body, headers=up_headers)
             latency = int((time.time() - started) * 1000)
             usage = {}
@@ -1452,27 +1458,29 @@ async def _chat(request: Request, upstream_path: str):
                                 status_code=resp.status_code, headers=headers)
         except Exception as exc:  # noqa: BLE001
             latency = int((time.time() - started) * 1000)
-            _record(key, ip, requested_model or '', mapped or '', 502, 0, 0, latency, ua, str(exc), False,
+            error = err_text(exc)
+            _record(key, ip, requested_model or '', mapped or '', 502, 0, 0, latency, ua, error, False,
                     account_expected=_account_expected_after_error(exc))
             tap_svc.capture(
                 body=client_body, headers=request.headers.items(), key=key, ua=ua,
                 path=upstream_path, protocol='chat', status=502, latency_ms=latency,
-                stream=False, error=str(exc), upstream_body=body,
+                stream=False, error=error, upstream_body=body,
                 upstream_headers=up_headers, trace_id=trace_id,
             )
-            return _oai_error(f'上游不可用: {exc}' + _upstream_hint(upstream), 502, 'api_error', 'upstream_unavailable')
+            return _oai_error(f'上游不可用: {error}' + _upstream_hint(upstream), 502, 'api_error', 'upstream_unavailable')
 
     # 流式转发
-    client = config.http_client(config.UPSTREAM_TIMEOUT, connect=5)
+    client = config.http_client(_inference_timeout(upstream), connect=5)
     try:
         req = client.build_request('POST', url, json=body, headers=up_headers)
         resp = await client.send(req, stream=True)
     except Exception as exc:  # noqa: BLE001
         await client.aclose()
         latency = int((time.time() - started) * 1000)
-        _record(key, ip, requested_model or '', mapped or '', 502, 0, 0, latency, ua, str(exc), True, effort=effort,
+        error = err_text(exc)
+        _record(key, ip, requested_model or '', mapped or '', 502, 0, 0, latency, ua, error, True, effort=effort,
                 account_expected=_account_expected_after_error(exc))
-        return _oai_error(f'上游不可用: {exc}' + _upstream_hint(upstream), 502, 'api_error', 'upstream_unavailable')
+        return _oai_error(f'上游不可用: {error}' + _upstream_hint(upstream), 502, 'api_error', 'upstream_unavailable')
 
     status_code = resp.status_code
     content_type = resp.headers.get('content-type', 'text/event-stream')
